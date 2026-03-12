@@ -1,6 +1,7 @@
 # Experiment artifacts (created by autoresearch sessions)
 experiments/*
 !experiments/.gitkeep
+!experiments/worklog.md
 autoresearch.jsonl
 autoresearch-dashboard.md
 autoresearch.md
