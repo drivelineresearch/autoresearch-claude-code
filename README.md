@@ -1,13 +1,30 @@
 # autoresearch-claude-code
 
-Autonomous experiment loop for Claude Code. Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) as a pure skill (no MCP server).
+Autonomous experiment loop for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) as a pure skill (no MCP server).
 
-Continuously optimizes any measurable target (test speed, bundle size, training loss, etc.) by running experiments, measuring results, keeping winners, discarding losers, and looping forever until interrupted.
+Continuously optimizes any measurable target (test speed, bundle size, training loss, model accuracy, etc.) by running experiments, measuring results, keeping winners, discarding losers, and looping forever until interrupted.
 
 ## Install
 
+Clone the repo and tell Claude Code to install it:
+
 ```bash
-git clone <this-repo> ~/autoresearch-claude-code
+git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
+```
+
+Then in Claude Code, point it at the repo and ask it to install:
+
+```
+Install autoresearch from ~/autoresearch-claude-code
+```
+
+Claude will run `install.sh`, which symlinks the skill and command into `~/.claude/` and copies the hook script. It will also guide you through adding the hook to your `~/.claude/settings.json`.
+
+### Manual install
+
+If you prefer to install manually:
+
+```bash
 cd ~/autoresearch-claude-code
 ./install.sh
 ```
@@ -39,7 +56,7 @@ In Claude Code:
 This will:
 1. Ask/infer: goal, command, metric, files in scope, constraints
 2. Create a git branch `autoresearch/<goal>-<date>`
-3. Write `autoresearch.md` (session doc) and `autoresearch.sh` (benchmark script)
+3. Write `autoresearch.md` (session doc), `autoresearch.sh` (benchmark script), and `experiments/worklog.md` (narrative log)
 4. Run a baseline, then loop forever optimizing
 
 ### Commands
@@ -79,6 +96,19 @@ All state lives in `autoresearch.jsonl`:
 {"run":2,"commit":"def5678","metric":39.1,"metrics":{},"status":"keep","description":"parallelize setup","timestamp":1234567891,"segment":0}
 ```
 
+### Experiment artifacts
+
+During a session, several files are created in your working directory. These are all gitignored by default:
+
+| File | Purpose |
+|---|---|
+| `autoresearch.jsonl` | Machine-readable experiment state |
+| `autoresearch-dashboard.md` | Human-readable results table |
+| `autoresearch.md` | Session config (objective, constraints, scope) |
+| `autoresearch.sh` | Benchmark runner script |
+| `autoresearch.ideas.md` | Ideas backlog for future experiments |
+| `experiments/worklog.md` | Narrative log of all experiments and insights |
+
 ## Uninstall
 
 ```bash
@@ -87,3 +117,7 @@ cd ~/autoresearch-claude-code
 ```
 
 Then remove the hook entry from `~/.claude/settings.json`.
+
+## License
+
+[MIT](LICENSE)

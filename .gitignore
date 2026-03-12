@@ -1,0 +1,23 @@
+# Experiment artifacts (created by autoresearch sessions)
+experiments/*
+!experiments/.gitkeep
+autoresearch.jsonl
+autoresearch-dashboard.md
+autoresearch.md
+autoresearch.sh
+autoresearch.ideas.md
+.autoresearch-off
+plots/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.venv/
+
+# External data
+third_party/
+
+# Tooling
+.osgrep/

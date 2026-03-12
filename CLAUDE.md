@@ -12,6 +12,7 @@ commands/autoresearch.md       # /autoresearch slash command (start, resume, off
 hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
 install.sh                     # Symlinks into ~/.claude/
 uninstall.sh                   # Removes symlinks
+experiments/                   # Gitignored — experiment worklogs go here
 ```
 
 ## Key conventions
@@ -20,7 +21,9 @@ uninstall.sh                   # Removes symlinks
 - **JSONL format** in `autoresearch.jsonl` is the state format. Config headers start segments, result lines track experiments. See SKILL.md for exact JSON schemas.
 - **Git commits on keep** use a `Result: {...}` trailer in the commit message body.
 - **Dashboard** is written to `autoresearch-dashboard.md` (file-based, not TUI).
+- **Worklog** is written to `experiments/worklog.md` — narrative log of experiments and insights, survives context compactions.
 - The hook script must output to stdout (that's how Claude Code hooks inject context).
+- All experiment artifacts (`autoresearch.jsonl`, `autoresearch-dashboard.md`, `autoresearch.md`, `autoresearch.sh`, `experiments/`, `plots/`) are gitignored.
 
 ## Editing tips
 

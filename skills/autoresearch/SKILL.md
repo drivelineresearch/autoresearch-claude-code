@@ -12,7 +12,7 @@ Autonomous experiment loop: try ideas, keep what works, discard what doesn't, ne
 1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Files in scope**, **Constraints**.
 2. `git checkout -b autoresearch/<goal>-<date>`
 3. Read the source files. Understand the workload deeply before writing anything.
-4. Write `autoresearch.md` and `autoresearch.sh` (see below). Commit both.
+4. `mkdir -p experiments` then write `autoresearch.md`, `autoresearch.sh`, and `experiments/worklog.md` (see below). Commit all three.
 5. Initialize experiment (write config header to `autoresearch.jsonl`) → run baseline → log result → start looping immediately.
 
 ### `autoresearch.md`
@@ -170,7 +170,24 @@ echo '{"run":<N>,"commit":"<hash>","metric":<value>,"metrics":{<secondaries>},"s
 
 After every log, regenerate `autoresearch-dashboard.md` (see Dashboard section below).
 
-### 5. Secondary metric consistency
+### 5. Append to worklog
+
+After every experiment, append a concise entry to `experiments/worklog.md`. This file survives context compactions and crashes, giving any resuming agent (or the user) a complete narrative of the session. Format:
+
+```markdown
+### Run N: <short description> — <primary_metric>=<value> (<STATUS>)
+- Timestamp: YYYY-MM-DD HH:MM
+- What changed: <1-2 sentences describing the code/config change>
+- Result: <metric values>, <delta vs best>
+- Insight: <what was learned, why it worked/failed>
+- Next: <what to try next based on this result>
+```
+
+Also update the "Key Insights" and "Next Ideas" sections at the bottom of the worklog when you learn something new.
+
+**On setup**, create `experiments/worklog.md` with the session header, data summary, and baseline result. **On resume**, read `experiments/worklog.md` to recover context.
+
+### 6. Secondary metric consistency
 
 Once you start tracking a secondary metric, you MUST include it in every subsequent result. Parse the JSONL to discover which secondary metrics have been tracked and ensure all are present.
 
@@ -210,7 +227,7 @@ Include delta percentages vs baseline for each metric value. Show ALL runs in th
 - **Don't thrash.** Repeatedly reverting the same idea? Try something structurally different.
 - **Crashes:** fix if trivial, otherwise log and move on. Don't over-invest.
 - **Think longer when stuck.** Re-read source files, study the profiling data, reason about what the CPU is actually doing. The best ideas come from deep understanding, not from trying random variations.
-- **Resuming:** if `autoresearch.md` exists, read it + `autoresearch.jsonl` + git log, continue looping.
+- **Resuming:** if `autoresearch.md` exists, read it + `autoresearch.jsonl` + `experiments/worklog.md` + git log, continue looping. The worklog has the full narrative and insights.
 
 **NEVER STOP.** The user may be away for hours. Keep going until interrupted.
 
