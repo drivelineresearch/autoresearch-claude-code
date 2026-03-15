@@ -1,0 +1,11 @@
+{
+  "name": "autoresearch",
+  "version": "1.0.0",
+  "description": "Autonomous experiment loop — iteratively optimize any metric with git-tracked experiments",
+  "author": {
+    "name": "Kyle"
+  },
+  "repository": "https://github.com/obra/autoresearch-claude-code",
+  "license": "MIT",
+  "keywords": ["experiments", "optimization", "autonomous", "research"]
+}

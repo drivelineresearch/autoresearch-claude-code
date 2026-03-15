@@ -2,16 +2,17 @@
 
 ## What is this?
 
-A Claude Code skill that implements an autonomous experiment loop. Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) — no MCP server, pure skill + hooks.
+A Claude Code **plugin** that implements an autonomous experiment loop. Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) — no MCP server, pure skill + hooks.
 
 ## Project structure
 
 ```
+.claude-plugin/plugin.json     # Plugin manifest
 skills/autoresearch/SKILL.md   # Core skill: setup, JSONL protocol, run/log/loop logic
 commands/autoresearch.md       # /autoresearch slash command (start, resume, off)
+hooks/hooks.json               # Hook definitions (plugin format)
 hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
-install.sh                     # Symlinks into ~/.claude/
-uninstall.sh                   # Removes symlinks
+examples/                      # Fastball velocity prediction demo files
 experiments/                   # Gitignored — experiment worklogs go here
 ```
 
@@ -30,3 +31,4 @@ experiments/                   # Gitignored — experiment worklogs go here
 - If changing the JSONL schema, update both the "JSONL State Protocol" and "Logging Results" sections in SKILL.md — they must stay in sync.
 - The command file uses `$ARGUMENTS` which Claude Code substitutes with the user's slash command arguments.
 - Hook scripts run in the user's cwd, not the repo directory.
+- `hooks/hooks.json` defines hooks in plugin format. The shell script path uses `${CLAUDE_PLUGIN_ROOT}` which resolves at runtime.
