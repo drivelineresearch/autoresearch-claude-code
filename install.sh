@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Install autoresearch-claude-code into ~/.claude/
 set -euo pipefail
 

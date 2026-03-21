@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Autoresearch Context Injection Hook (UserPromptSubmit)
 #
 # When autoresearch mode is active (autoresearch.md exists and no .autoresearch-off sentinel),

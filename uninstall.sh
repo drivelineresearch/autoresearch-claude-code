@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Uninstall autoresearch-claude-code from ~/.claude/
 set -euo pipefail
 
