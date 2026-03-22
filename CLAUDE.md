@@ -2,7 +2,7 @@
 
 ## What is this?
 
-A Claude Code **plugin** that implements an autonomous experiment loop. Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) — no MCP server, pure skill + hooks.
+A Claude Code skill/plugin that implements an autonomous experiment loop. Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) — no MCP server, pure skill + hooks. Installable as a plugin (`claude --plugin-dir .`) or via manual symlinks (`./install.sh`).
 
 ## Project structure
 
@@ -12,6 +12,7 @@ skills/autoresearch/SKILL.md   # Core skill: setup, JSONL protocol, run/log/loop
 commands/autoresearch.md       # /autoresearch slash command (start, resume, off)
 hooks/hooks.json               # Hook definitions (plugin format)
 hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
+install.sh / uninstall.sh      # Manual symlink install (alternative to plugin)
 examples/                      # Fastball velocity prediction demo files
 experiments/                   # Gitignored — experiment worklogs go here
 ```

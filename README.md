@@ -9,38 +9,28 @@ Runs experiments, measures results, keeps winners, discards losers, loops foreve
 
 ## Install
 
-### Quick start (development / testing)
+### Option A: Plugin (recommended)
 
 ```bash
+# One-session test drive
 claude --plugin-dir /path/to/autoresearch-claude-code
+
+# Permanent — add to ~/.claude/settings.json:
+# { "plugins": ["~/autoresearch-claude-code"] }
+
+# Toggle on/off
+claude plugin disable autoresearch
+claude plugin enable autoresearch
 ```
 
-This loads the plugin for the current session only.
-
-### Permanent install
-
-Clone the repo and point Claude Code at it:
+### Option B: Manual symlinks
 
 ```bash
-git clone https://github.com/obra/autoresearch-claude-code.git ~/autoresearch-claude-code
+git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
+cd ~/autoresearch-claude-code && ./install.sh
 ```
 
-Then add to your `~/.claude/settings.json`:
-
-```json
-{
-  "plugins": ["~/autoresearch-claude-code"]
-}
-```
-
-### Toggle on/off
-
-```bash
-claude plugin disable autoresearch   # disable (hooks stop firing too)
-claude plugin enable autoresearch    # re-enable
-```
-
-Or use `/plugin` inside Claude Code for an interactive manager.
+To remove: `./uninstall.sh`
 
 ## Usage
 
@@ -90,7 +80,7 @@ See [`examples/obp-autoresearch.md`](examples/obp-autoresearch.md) for the sessi
 
 State lives in `autoresearch.jsonl`. Session artifacts (`*.jsonl`, dashboard, session doc, benchmark script, ideas backlog, worklog) are gitignored.
 
-## Plugin structure
+## Project structure
 
 ```
 .claude-plugin/plugin.json     # Plugin manifest
@@ -98,6 +88,7 @@ skills/autoresearch/SKILL.md   # Core skill: setup, JSONL protocol, run/log/loop
 commands/autoresearch.md       # /autoresearch slash command (start, resume, off)
 hooks/hooks.json               # Hook definitions (plugin format)
 hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
+install.sh / uninstall.sh      # Manual symlink install (alternative to plugin)
 examples/                      # Fastball velocity prediction demo
 ```
 

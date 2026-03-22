@@ -5,7 +5,7 @@
   "author": {
     "name": "Kyle"
   },
-  "repository": "https://github.com/obra/autoresearch-claude-code",
+  "repository": "https://github.com/drivelineresearch/autoresearch-claude-code",
   "license": "MIT",
   "keywords": ["experiments", "optimization", "autonomous", "research"]
 }
