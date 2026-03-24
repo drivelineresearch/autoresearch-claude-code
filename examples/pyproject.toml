@@ -1,0 +1,26 @@
+[project]
+name = "autoresearch-example"
+version = "0.1.0"
+description = "Example model zoo for autoresearch — fastball velocity prediction"
+requires-python = ">=3.10"
+dependencies = [
+    "xgboost",
+    "scikit-learn",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "rich",
+]
+
+[project.optional-dependencies]
+torch = ["torch"]
+boost = ["catboost", "lightgbm"]
+tabpfn = ["tabpfn>=2.0"]
+tabnet = ["pytorch-tabnet"]
+all = [
+    "torch",
+    "catboost",
+    "lightgbm",
+    "tabpfn>=2.0",
+    "pytorch-tabnet",
+]

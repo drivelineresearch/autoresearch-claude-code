@@ -13,7 +13,10 @@ commands/autoresearch.md       # /autoresearch slash command (start, resume, off
 hooks/hooks.json               # Hook definitions (plugin format)
 hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
 install.sh / uninstall.sh      # Manual symlink install (alternative to plugin)
-examples/                      # Fastball velocity prediction demo files
+examples/                      # Demo: fastball velocity prediction + model zoo
+  train.py                     # Training orchestrator with rich TUI output
+  models.py                    # Model registry (19 models, GPU detection)
+  pyproject.toml               # uv project config with dependency groups
 experiments/                   # Gitignored — experiment worklogs go here
 ```
 
@@ -26,6 +29,12 @@ experiments/                   # Gitignored — experiment worklogs go here
 - **Worklog** is written to `experiments/worklog.md` — narrative log of experiments and insights, survives context compactions.
 - The hook script must output to stdout (that's how Claude Code hooks inject context).
 - All experiment artifacts (`autoresearch.jsonl`, `autoresearch-dashboard.md`, `autoresearch.md`, `autoresearch.sh`, `experiments/`, `plots/`) are gitignored.
+
+## Package management & output
+
+- **Use `uv` for all package management**, never `pip`. The example uses `pyproject.toml` with optional dependency groups (`uv sync`, `uv sync --extra torch`, `uv sync --extra all`).
+- **The example uses `rich` for terminal output** with graceful fallback. Rich output goes to stderr via `Console(stderr=True)`; `METRIC name=value` lines always go to stdout as plain text (autoresearch parses them).
+- Models in `examples/models.py` use **lazy imports** for optional deps (torch, catboost, lightgbm, tabpfn, pytorch-tabnet). Missing deps produce clear error messages, not crashes.
 
 ## Editing tips
 
