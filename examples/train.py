@@ -186,9 +186,11 @@ def cross_validate(X, y, groups):
                 fit_kwargs["eval_set"] = [(X_val, y_val)]
                 fit_kwargs["callbacks"] = [lgb.early_stopping(50), lgb.log_evaluation(0)]
             elif MODEL_TYPE in ("pytorch_mlp", "mc_dropout", "ft_transformer"):
-                # PyTorch wrappers: pass raw data, scaler is in pipeline
-                # eval_set must be passed to the inner estimator
-                fit_kwargs[f"{MODEL_TYPE.replace('_', '')}__eval_set"] = [(X_val, y_val)]
+                # PyTorch wrappers: eval_set passed to inner pipeline step
+                # Step names: mlp, mc, ftt (must match models.py Pipeline keys)
+                step_name = {"pytorch_mlp": "mlp", "mc_dropout": "mc",
+                             "ft_transformer": "ftt"}[MODEL_TYPE]
+                fit_kwargs[f"{step_name}__eval_set"] = [(X_val, y_val)]
             elif MODEL_TYPE == "tabnet":
                 fit_kwargs["tabnet__eval_set"] = [(X_val.values, y_val)]
                 fit_kwargs["tabnet__eval_metric"] = ["rmse"]

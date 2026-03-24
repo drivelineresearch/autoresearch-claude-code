@@ -382,6 +382,7 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
 
     def _forward(self, X_t):
         """Tokenize features, prepend CLS, run transformer, project."""
+        import torch
         # X_t: (batch, n_features) → tokens: (batch, n_features, d_model)
         tokens = torch.stack([
             emb(X_t[:, i:i+1]) for i, emb in enumerate(self.feat_embeddings_)
