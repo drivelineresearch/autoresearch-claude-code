@@ -95,6 +95,15 @@ def load_data():
     X = df.drop(columns=drop)
 
     # Feature engineering: kinetic chain ratios
+    _FE_COLS = ["elbow_transfer_fp_br", "shoulder_transfer_fp_br",
+                "thorax_distal_transfer_fp_br", "pelvis_lumbar_transfer_fp_br",
+                "max_torso_rotational_velo", "max_pelvis_rotational_velo",
+                "lead_grf_mag_max", "rear_grf_mag_max",
+                "shoulder_internal_rotation_moment", "elbow_varus_moment"]
+    _missing = [c for c in _FE_COLS if c not in X.columns]
+    if _missing:
+        info(f"Warning: missing expected columns for feature engineering: {_missing}")
+
     eps = 1e-6
     X["thorax_to_elbow_transfer_ratio"] = X["thorax_distal_transfer_fp_br"] / (X["elbow_transfer_fp_br"] + eps)
     X["shoulder_to_elbow_transfer_ratio"] = X["shoulder_transfer_fp_br"] / (X["elbow_transfer_fp_br"] + eps)
@@ -186,13 +195,20 @@ def cross_validate(X, y, groups):
                 fit_kwargs["eval_set"] = [(X_val, y_val)]
                 fit_kwargs["callbacks"] = [lgb.early_stopping(50), lgb.log_evaluation(0)]
             elif MODEL_TYPE in ("pytorch_mlp", "mc_dropout", "ft_transformer"):
-                # PyTorch wrappers: eval_set passed to inner pipeline step
-                # Step names: mlp, mc, ftt (must match models.py Pipeline keys)
+                # PyTorch wrappers: eval_set passed to inner pipeline step.
+                # The Pipeline's StandardScaler transforms X_train but not eval_set,
+                # so we must pre-scale X_val to match what the inner model sees.
+                from sklearn.preprocessing import StandardScaler as _SS
+                _scaler = _SS().fit(X_train)
+                X_val_scaled = pd.DataFrame(
+                    _scaler.transform(X_val), columns=X_val.columns, index=X_val.index
+                )
                 step_name = {"pytorch_mlp": "mlp", "mc_dropout": "mc",
                              "ft_transformer": "ftt"}[MODEL_TYPE]
-                fit_kwargs[f"{step_name}__eval_set"] = [(X_val, y_val)]
+                fit_kwargs[f"{step_name}__eval_set"] = [(X_val_scaled, y_val)]
             elif MODEL_TYPE == "tabnet":
-                fit_kwargs["tabnet__eval_set"] = [(X_val.values, y_val)]
+                fit_kwargs["tabnet__eval_set"] = [(X_val.values, y_val.reshape(-1, 1))]
+                fit_kwargs["tabnet__eval_name"] = ["val"]
                 fit_kwargs["tabnet__eval_metric"] = ["rmse"]
 
         # Stacking: inject group-aware inner CV

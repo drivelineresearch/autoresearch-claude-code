@@ -33,7 +33,33 @@ def detect_gpu():
         return False
 
 
-USE_GPU = detect_gpu()
+_USE_GPU = None
+
+
+def _get_use_gpu():
+    """Lazy GPU detection — avoids importing torch at module load time."""
+    global _USE_GPU
+    if _USE_GPU is None:
+        _USE_GPU = detect_gpu()
+    return _USE_GPU
+
+
+class _LazyGPU:
+    """Descriptor that defers GPU detection until first access."""
+    def __repr__(self):
+        return repr(_get_use_gpu())
+    def __bool__(self):
+        return _get_use_gpu()
+    def __eq__(self, other):
+        return _get_use_gpu() == other
+
+
+USE_GPU = _LazyGPU()
+
+
+def _to_numpy(X):
+    """Convert DataFrame/array to numpy, used by PyTorch wrappers."""
+    return X.values if hasattr(X, "values") else X
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +170,13 @@ class TorchMLPRegressor(BaseEstimator, RegressorMixin):
         import torch
         import torch.nn as nn
 
+        if eval_set is None and self.patience < self.epochs:
+            import warnings
+            warnings.warn(
+                f"No eval_set provided to {self.__class__.__name__}; "
+                f"training for full {self.epochs} epochs without early stopping."
+            )
+
         torch.manual_seed(self.random_state)
         np.random.seed(self.random_state)
         if torch.cuda.is_available():
@@ -169,16 +202,14 @@ class TorchMLPRegressor(BaseEstimator, RegressorMixin):
             self.net_.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
 
-        X_arr = X.values if hasattr(X, "values") else X
-        X_t = torch.tensor(X_arr, dtype=torch.float32).to(self.device_)
+        X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         y_t = torch.tensor(y, dtype=torch.float32).reshape(-1, 1).to(self.device_)
 
         # Validation data for early stopping
         X_val_t, y_val_t = None, None
         if eval_set is not None:
             X_v, y_v = eval_set[0]
-            X_v_arr = X_v.values if hasattr(X_v, "values") else X_v
-            X_val_t = torch.tensor(X_v_arr, dtype=torch.float32).to(self.device_)
+            X_val_t = torch.tensor(_to_numpy(X_v), dtype=torch.float32).to(self.device_)
             y_val_t = torch.tensor(y_v, dtype=torch.float32).reshape(-1, 1).to(self.device_)
 
         best_val_loss = float("inf")
@@ -224,8 +255,7 @@ class TorchMLPRegressor(BaseEstimator, RegressorMixin):
     def predict(self, X):
         import torch
         self.net_.eval()
-        X_arr = X.values if hasattr(X, "values") else X
-        X_t = torch.tensor(X_arr, dtype=torch.float32).to(self.device_)
+        X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         with torch.no_grad():
             return self.net_(X_t).cpu().numpy().flatten()
 
@@ -244,8 +274,7 @@ class MCDropoutRegressor(TorchMLPRegressor):
     def predict(self, X):
         import torch
         self.net_.train()  # keep dropout ON
-        X_arr = X.values if hasattr(X, "values") else X
-        X_t = torch.tensor(X_arr, dtype=torch.float32).to(self.device_)
+        X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         preds = []
         with torch.no_grad():
             for _ in range(self.mc_samples):
@@ -322,15 +351,13 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
         )
         optimizer = torch.optim.AdamW(all_params, lr=self.lr, weight_decay=self.weight_decay)
 
-        X_arr = X.values if hasattr(X, "values") else X
-        X_t = torch.tensor(X_arr, dtype=torch.float32).to(self.device_)
+        X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         y_t = torch.tensor(y, dtype=torch.float32).reshape(-1, 1).to(self.device_)
 
         X_val_t, y_val_t = None, None
         if eval_set is not None:
             X_v, y_v = eval_set[0]
-            X_v_arr = X_v.values if hasattr(X_v, "values") else X_v
-            X_val_t = torch.tensor(X_v_arr, dtype=torch.float32).to(self.device_)
+            X_val_t = torch.tensor(_to_numpy(X_v), dtype=torch.float32).to(self.device_)
             y_val_t = torch.tensor(y_v, dtype=torch.float32).reshape(-1, 1).to(self.device_)
 
         best_val_loss = float("inf")
@@ -375,8 +402,7 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
     def predict(self, X):
         import torch
         self._set_train(False)
-        X_arr = X.values if hasattr(X, "values") else X
-        X_t = torch.tensor(X_arr, dtype=torch.float32).to(self.device_)
+        X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         with torch.no_grad():
             return self._forward(X_t).cpu().numpy().flatten()
 
@@ -433,8 +459,7 @@ def _build_xgboost(params):
         "early_stopping_rounds": 50,
     }
     if USE_GPU:
-        defaults["tree_method"] = "gpu_hist"
-        defaults["gpu_id"] = 0
+        defaults["device"] = "cuda"
     defaults.update(params)
     return xgb.XGBRegressor(**defaults), {
         "needs_scaling": False,

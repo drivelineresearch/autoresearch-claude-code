@@ -158,6 +158,8 @@ git checkout -- .
 git clean -fd
 ```
 
+> **Warning:** Never use `git clean -fdx` — the `-x` flag deletes gitignored files including JSONL state, dashboards, and experiment artifacts.
+
 Use the current HEAD hash (before revert) as the commit field.
 
 ### 3. Append result to JSONL
