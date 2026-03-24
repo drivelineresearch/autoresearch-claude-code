@@ -46,6 +46,8 @@ def _get_use_gpu():
 
 class _LazyGPU:
     """Descriptor that defers GPU detection until first access."""
+    __hash__ = None
+
     def __repr__(self):
         return repr(_get_use_gpu())
     def __bool__(self):
@@ -312,6 +314,13 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
         import torch
         import torch.nn as nn
 
+        if eval_set is None and self.patience < self.epochs:
+            import warnings
+            warnings.warn(
+                f"No eval_set provided to {self.__class__.__name__}; "
+                f"training for full {self.epochs} epochs without early stopping."
+            )
+
         torch.manual_seed(self.random_state)
         np.random.seed(self.random_state)
         if torch.cuda.is_available():
@@ -480,6 +489,7 @@ def _build_catboost(params):
     defaults = {
         "iterations": 1000, "depth": 4, "learning_rate": 0.03,
         "l2_leaf_reg": 3, "random_seed": 42, "verbose": 0,
+        "early_stopping_rounds": 50,
     }
     if USE_GPU:
         defaults["task_type"] = "GPU"

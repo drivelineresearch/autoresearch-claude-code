@@ -207,7 +207,11 @@ def cross_validate(X, y, groups):
                              "ft_transformer": "ftt"}[MODEL_TYPE]
                 fit_kwargs[f"{step_name}__eval_set"] = [(X_val_scaled, y_val)]
             elif MODEL_TYPE == "tabnet":
-                fit_kwargs["tabnet__eval_set"] = [(X_val.values, y_val.reshape(-1, 1))]
+                # TabNet Pipeline has StandardScaler — pre-scale eval_set
+                from sklearn.preprocessing import StandardScaler as _SS
+                _scaler_tn = _SS().fit(X_train)
+                X_val_scaled_tn = _scaler_tn.transform(X_val)
+                fit_kwargs["tabnet__eval_set"] = [(X_val_scaled_tn, y_val.reshape(-1, 1))]
                 fit_kwargs["tabnet__eval_name"] = ["val"]
                 fit_kwargs["tabnet__eval_metric"] = ["rmse"]
 
