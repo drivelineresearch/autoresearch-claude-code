@@ -275,7 +275,12 @@ class MCDropoutRegressor(TorchMLPRegressor):
 
     def predict(self, X):
         import torch
-        self.net_.train()  # keep dropout ON
+        # Eval mode first (BatchNorm needs eval to avoid crash on single-sample
+        # batches common with LOGO CV), then selectively enable Dropout only.
+        self.net_.eval()
+        for m in self.net_.modules():
+            if isinstance(m, torch.nn.Dropout):
+                m.train()
         X_t = torch.tensor(_to_numpy(X), dtype=torch.float32).to(self.device_)
         preds = []
         with torch.no_grad():
@@ -465,7 +470,6 @@ def _build_xgboost(params):
         "n_estimators": 1000, "max_depth": 4, "learning_rate": 0.03,
         "subsample": 0.7, "colsample_bytree": 0.7, "min_child_weight": 5,
         "reg_alpha": 0.5, "reg_lambda": 2.0, "random_state": 42,
-        "early_stopping_rounds": 50,
     }
     if USE_GPU:
         defaults["device"] = "cuda"

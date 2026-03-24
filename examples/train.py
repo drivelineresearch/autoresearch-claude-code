@@ -81,7 +81,7 @@ def load_data():
     if AGGREGATE_TO_PLAYER:
         numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c != GROUP_COL]
         agg_df = df.groupby(GROUP_COL)[numeric_cols].mean().reset_index()
-        std_cols = ["pitch_speed_mph", "elbow_transfer_fp_br", "shoulder_transfer_fp_br",
+        std_cols = ["elbow_transfer_fp_br", "shoulder_transfer_fp_br",
                     "thorax_distal_transfer_fp_br"]
         for col in std_cols:
             if col in df.columns:
@@ -129,13 +129,13 @@ def select_features(X, y, groups):
         "n_estimators": 200, "max_depth": 4, "learning_rate": 0.03,
         "subsample": 0.7, "colsample_bytree": 0.7, "min_child_weight": 5,
         "reg_alpha": 0.5, "reg_lambda": 2.0, "random_state": SEED,
-        "early_stopping_rounds": 20,
     }
 
     for train_idx, val_idx in gkf.split(X, y, groups):
         model = xgb.XGBRegressor(**quick_params)
         model.fit(X.iloc[train_idx], y[train_idx],
-                  eval_set=[(X.iloc[val_idx], y[val_idx])], verbose=False)
+                  eval_set=[(X.iloc[val_idx], y[val_idx])], verbose=False,
+                  early_stopping_rounds=20)
         fold_importances.append(
             pd.Series(model.feature_importances_, index=X.columns)
         )
@@ -188,6 +188,7 @@ def cross_validate(X, y, groups):
             if MODEL_TYPE == "xgboost":
                 fit_kwargs["eval_set"] = [(X_val, y_val)]
                 fit_kwargs["verbose"] = False
+                fit_kwargs["early_stopping_rounds"] = 50
             elif MODEL_TYPE == "catboost":
                 fit_kwargs["eval_set"] = (X_val, y_val)
             elif MODEL_TYPE == "lightgbm":
@@ -198,6 +199,9 @@ def cross_validate(X, y, groups):
                 # PyTorch wrappers: eval_set passed to inner pipeline step.
                 # The Pipeline's StandardScaler transforms X_train but not eval_set,
                 # so we must pre-scale X_val to match what the inner model sees.
+                # NOTE: This works because both this scaler and the Pipeline's scaler
+                # are StandardScaler fit on the same X_train. If the Pipeline gains
+                # other preprocessing steps, this must be updated to match.
                 from sklearn.preprocessing import StandardScaler as _SS
                 _scaler = _SS().fit(X_train)
                 X_val_scaled = pd.DataFrame(
