@@ -9,7 +9,16 @@ Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) as a pur
 
 ## Install
 
-### Option A: Plugin (recommended)
+### Option A: Let Claude do it (easiest)
+
+```bash
+git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
+claude -p "Install the autoresearch plugin from ~/autoresearch-claude-code"
+```
+
+Claude will read the repo, run `install.sh`, and configure everything.
+
+### Option B: Plugin flag
 
 ```bash
 # One-session test drive
@@ -23,7 +32,7 @@ claude plugin disable autoresearch
 claude plugin enable autoresearch
 ```
 
-### Option B: Manual symlinks
+### Option C: Manual symlinks
 
 ```bash
 git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
