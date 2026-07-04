@@ -1,5 +1,7 @@
 # autoresearch-claude-code
 
+![autoresearch — autonomous experiment loop for Claude Code](imgs/autoresearch-banner.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://docs.anthropic.com/en/docs/claude-code)
 
@@ -46,10 +48,24 @@ To remove: `./uninstall.sh`
 ```
 /autoresearch optimize test suite runtime
 /autoresearch                              # resume existing loop
-/autoresearch off                          # pause (in-session)
+/autoresearch status                       # read-only: dashboard + best result so far
+/autoresearch report                       # write a final summary report
+/autoresearch off                          # pause the loop
 ```
 
-The agent creates a branch, writes a session doc + benchmark script, runs a baseline, then loops autonomously. Send messages mid-loop to steer the next experiment.
+The agent creates a branch, writes a session doc + benchmark script, measures a noise floor, runs a baseline, then loops autonomously. Send messages mid-loop to steer the next experiment.
+
+## Guardrails (why it doesn't fool itself)
+
+An autonomous "keep whatever wins" loop can quietly lie to you — banking seed noise as progress, gaming its own scorer, or running up unbounded spend. This port borrows the safeguards from Karpathy's [nanochat autoresearch agent](https://github.com/karpathy/nanochat) and the ML-experimentation literature:
+
+- **The loop is mechanically enforced.** A **Stop hook** vetoes the agent ending its turn until a real budget boundary is hit — "never stop" is a mechanism, not a hope. (Uses the JSON-`decision:block` form; exit-code-2 continuation is broken for plugin hooks, [#10412](https://github.com/anthropics/claude-code/issues/10412).)
+- **Noise floor.** The baseline is run several times at setup to measure metric variance; a change is only *kept* if it beats the best by **more than the noise floor**. Borderline wins are re-run on multiple seeds and compared by mean.
+- **Locked eval harness.** `autoresearch.sh` and the metric-emitting code are off-limits to experiments, so the agent can't "improve" the score by editing the scorer.
+- **Budget cap.** `maxRuns` / `maxSeconds` / `targetMetric` in the config header stop the loop cleanly — no unbounded overnight token burn.
+- **Correctness gate.** An optional `checks.sh` runs after the benchmark; a faster-but-wrong change can't be committed (`checks_failed` status).
+- **Survives compaction.** **PreCompact** snapshots state to the worklog; **SessionStart** rehydrates the objective + best result so a resumed agent continues instead of restarting.
+- **Structured search.** Draft several diverse approaches before greedily refining, track experiments as a tree (`parent` pointers) to backtrack out of local optima, and cap debug attempts so it can't rabbit-hole.
 
 ## What Can You Optimize?
 
@@ -125,29 +141,36 @@ GPU is auto-detected. When CUDA is available, XGBoost/CatBoost/LightGBM/PyTorch 
 
 | pi-autoresearch (MCP) | This port (Plugin) |
 |---|---|
-| `init_experiment` tool | Agent writes config to `autoresearch.jsonl` |
+| `init_experiment` tool | Agent writes config to `autoresearch.jsonl` (via `jq`) |
 | `run_experiment` tool | Agent runs `./autoresearch.sh` with timing |
-| `log_experiment` tool | Agent appends result JSON, `git commit` on keep |
+| `log_experiment` tool | Agent appends result via `scripts/ar-log.sh`, `git commit` on keep |
 | TUI dashboard | `autoresearch-dashboard.md` |
-| `before_agent_start` hook | `UserPromptSubmit` hook injects context |
+| iteration cap in `config.json` | `maxRuns`/`maxSeconds`/`targetMetric` in the config header |
+| — | **Stop hook** enforces the loop (never stops on its own) |
+| — | **PreCompact** + **SessionStart** hooks survive context compaction |
+| `before_agent_start` hook | `UserPromptSubmit` hook injects context + carries steers |
 
 State lives in `autoresearch.jsonl`. Session artifacts (`*.jsonl`, dashboard, session doc, benchmark script, ideas backlog, worklog) are gitignored.
 
 ## Project Structure
 
 ```
-.claude-plugin/plugin.json     # Plugin manifest
-skills/autoresearch/SKILL.md   # Core skill: setup, JSONL protocol, run/log/loop logic
-commands/autoresearch.md       # /autoresearch slash command (start, resume, off)
-hooks/hooks.json               # Hook definitions (plugin format)
-hooks/autoresearch-context.sh  # UserPromptSubmit hook — injects context when active
-install.sh / uninstall.sh      # Manual symlink install (alternative to plugin)
-examples/                      # Demo: fastball velocity prediction
-  train.py                     # Training script with rich TUI output
-  models.py                    # Model registry (19 models, GPU detection)
-  pyproject.toml               # uv project config with dependency groups
-  obp-autoresearch.md          # Session config for the OBP demo
-  autoresearch.sh              # Benchmark runner
+.claude-plugin/plugin.json          # Plugin manifest
+skills/autoresearch/SKILL.md        # Core skill: setup, JSONL protocol, run/log/loop logic
+skills/autoresearch/scripts/ar-log.sh  # Appends valid-JSON result lines (jq, Python fallback)
+commands/autoresearch.md            # /autoresearch (start, resume, status, report, off)
+hooks/hooks.json                    # Hook definitions (plugin format)
+hooks/autoresearch-stop.sh          # Stop hook — the loop engine + budget valve
+hooks/autoresearch-precompact.sh    # PreCompact hook — snapshots state before compaction
+hooks/autoresearch-sessionstart.sh  # SessionStart hook — rehydrates an active loop on resume
+hooks/autoresearch-context.sh       # UserPromptSubmit hook — context + user steers
+install.sh / uninstall.sh           # Manual symlink install (alternative to plugin)
+examples/                           # Demo: fastball velocity prediction
+  train.py                          # Training script with rich TUI output (AR_SEED-aware)
+  models.py                         # Model registry (19 models, GPU detection)
+  pyproject.toml                    # uv project config with dependency groups
+  obp-autoresearch.md               # Session config for the OBP demo
+  autoresearch.sh                   # Benchmark runner (takes optional SEED arg)
 ```
 
 ## License

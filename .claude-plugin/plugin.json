@@ -1,9 +1,10 @@
 {
   "name": "autoresearch",
-  "version": "1.0.0",
-  "description": "Autonomous experiment loop — iteratively optimize any metric with git-tracked experiments",
+  "version": "1.1.0",
+  "description": "Autonomous experiment loop — iteratively optimize any metric with git-tracked experiments, a Stop-hook loop engine, noise-floor keep/discard, and a locked eval harness",
   "author": {
-    "name": "Kyle"
+    "name": "Driveline Research",
+    "url": "https://github.com/drivelineresearch"
   },
   "repository": "https://github.com/drivelineresearch/autoresearch-claude-code",
   "license": "MIT",

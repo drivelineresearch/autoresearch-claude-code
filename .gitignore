@@ -8,6 +8,7 @@ autoresearch.md
 autoresearch.sh
 autoresearch.ideas.md
 .autoresearch-off
+.autoresearch-inspect
 plots/
 
 # Python
@@ -22,3 +23,6 @@ third_party/
 
 # Tooling
 .osgrep/
+
+# Driveline session state (not part of the plugin)
+brain/

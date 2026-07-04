@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Optional SEED arg → AR_SEED env, so the loop can re-run with different seeds to
+# measure the noise floor and confirm borderline wins. Defaults to train.py's own.
+export AR_SEED="${1:-${AR_SEED:-42}}"
+
 # Quick syntax checks (use same Python runtime as training to avoid version mismatch)
 if command -v uv &>/dev/null; then
     uv run python -c "import py_compile; py_compile.compile('train.py', doraise=True)" 2>&1 || { echo "Syntax error in train.py"; exit 1; }
