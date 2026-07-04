@@ -26,14 +26,14 @@ experiments/                        # Gitignored — experiment worklogs go here
 
 ## Key conventions
 
-- **SKILL.md is the source of truth** for all behavior. The original 3 MCP tools (`init_experiment`, `run_experiment`, `log_experiment`) are encoded as instructions the agent follows using Bash/Read/Write.
-- **JSONL format** in `autoresearch.jsonl` is the state format. Config headers start segments (and carry the budget/noise contract: `noiseFloor`, `maxRuns`, `maxSeconds`, `targetMetric`, `startedAt`), result lines track experiments (status `keep|discard|crash|checks_failed`, plus optional `op`/`parent` tree fields). See SKILL.md for exact JSON schemas.
+- **SKILL.md is the source of truth** for all behavior. The original 3 MCP tools (`init_experiment`/`run_experiment`/`log_experiment`) are encoded as instructions the agent follows with Bash/Read/Write.
+- **`autoresearch.jsonl` is the state format.** Config headers start segments and carry the budget/noise contract; result lines track experiments. Exact schemas → SKILL.md "JSONL State Protocol". If you change the schema, update both that section and "Logging Results" — they must stay in sync.
 - **Never hand-build result JSON with `echo`** — a quote/apostrophe in a description corrupts the file. Use `scripts/ar-log.sh` (or `jq -nc`).
-- **The four hooks are the loop's spine.** `Stop` enforces continuation (JSON `decision:block`, NOT exit 2 — exit-2 continuation is broken for plugin hooks, anthropics/claude-code#10412) with a budget valve; `PreCompact`/`SessionStart` survive compaction; `UserPromptSubmit` carries steers. All four honor the `.autoresearch-off` sentinel. Hook stdout must be clean (JSON-only where parsed) — diagnostics go to stderr.
-- **The eval harness is locked.** `autoresearch.sh` and metric-emitting code are Off Limits to experiments (prevents the agent gaming its own scorer). Keep/discard is gated on the **noise floor**, not raw improvement.
-- **Git commits on keep** use a `Result: {...}` trailer in the commit message body.
-- **Dashboard** is written to `autoresearch-dashboard.md` (file-based, not TUI). **Worklog** is `experiments/worklog.md` — narrative log, survives compaction.
-- All experiment artifacts (`autoresearch.jsonl`, `autoresearch-dashboard.md`, `autoresearch.md`, `autoresearch.sh`, `experiments/`, `plots/`) are gitignored.
+- **The four hooks are the loop's spine** — `Stop` enforces continuation, `PreCompact`/`SessionStart` survive compaction, `UserPromptSubmit` carries steers. Continuation MUST use JSON `decision:block`, never `exit 2` (broken for plugin hooks, anthropics/claude-code#10412). → SKILL.md "Loop enforcement".
+- **Hook stdout must be clean** — JSON-only where parsed, all diagnostics to stderr; a stray echo corrupts parsing. All four honor the `.autoresearch-off` sentinel.
+- **The eval harness is locked.** `autoresearch.sh` and metric-emitting code are Off Limits to experiments — an agent that can edit its own scorer will game it. Keep/discard is gated on the **noise floor**, not raw improvement.
+- **Git commits on keep** use a `Result: {...}` trailer in the commit body. Dashboard → `autoresearch-dashboard.md`; narrative worklog → `experiments/worklog.md`.
+- All session artifacts (`autoresearch.jsonl`, `autoresearch-dashboard.md`, `autoresearch.md`, `autoresearch.sh`, `experiments/`, `plots/`, `brain/`) are gitignored.
 
 ## Package management & output
 
@@ -43,7 +43,14 @@ experiments/                        # Gitignored — experiment worklogs go here
 
 ## Editing tips
 
-- If changing the JSONL schema, update both the "JSONL State Protocol" and "Logging Results" sections in SKILL.md — they must stay in sync.
-- The command file uses `$ARGUMENTS` which Claude Code substitutes with the user's slash command arguments.
-- Hook scripts run in the user's cwd, not the repo directory.
-- `hooks/hooks.json` defines hooks in plugin format. The shell script path uses `${CLAUDE_PLUGIN_ROOT}` which resolves at runtime.
+- The command file uses `$ARGUMENTS`, which Claude Code substitutes with the slash-command arguments.
+- **Hook scripts run in the user's cwd, not the repo** — resolve state files relative to the payload's `cwd`, not `$0`.
+- `hooks/hooks.json` uses plugin format; script paths use `"${CLAUDE_PLUGIN_ROOT}"` (quoted — resolves at runtime, may contain spaces).
+
+<!-- AGENT-MANAGED SECTION — Claude and other agents may add learnings below this line. -->
+<!-- Lifecycle: (1) write the why/history into SKILL.md or a notes file FIRST, (2) add a one-line pointer here, -->
+<!-- (3) once stable, graduate it into the matching section above and delete it here. Keep this an inbox, not an archive. -->
+
+## Discovered Patterns
+
+_(none yet)_
