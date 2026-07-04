@@ -48,7 +48,7 @@ def info(msg):
 # Config — the autoresearch agent modifies these
 # ---------------------------------------------------------------------------
 
-SEED = 42
+SEED = int(os.environ.get("AR_SEED", "42"))  # autoresearch.sh passes SEED for noise-floor / confirm re-runs
 DATA_PATH = "third_party/openbiomechanics/baseball_pitching/data/poi/poi_metrics.csv"
 PLOT_DIR = "plots"
 N_FOLDS = 5

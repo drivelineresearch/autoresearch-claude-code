@@ -22,3 +22,6 @@ third_party/
 
 # Tooling
 .osgrep/
+
+# Driveline session state (not part of the plugin)
+brain/
