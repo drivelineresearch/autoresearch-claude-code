@@ -23,8 +23,11 @@ if [ -f "autoresearch.jsonl" ]; then
   mkdir -p experiments
   cp autoresearch.jsonl "experiments/autoresearch.jsonl.precompact.bak"
 
-  runs=$(grep -c '"run"' autoresearch.jsonl 2>/dev/null || echo 0)
-  kept=$(grep -c '"status":"keep"' autoresearch.jsonl 2>/dev/null || echo 0)
+  # grep -c already prints 0 (and exits 1) when there are no matches; the file
+  # exists here, so capture the count directly without a `|| echo 0` that would
+  # double-print "0" on an empty file.
+  runs=$(grep -c '"run":' autoresearch.jsonl 2>/dev/null); runs=${runs:-0}
+  kept=$(grep -c '"status":"keep"' autoresearch.jsonl 2>/dev/null); kept=${kept:-0}
   {
     echo ""
     echo "### ⟳ Compaction checkpoint — $ts"

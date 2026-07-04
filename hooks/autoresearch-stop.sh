@@ -44,14 +44,20 @@ except OSError:
     sys.exit()
 
 cfg = {}
-results = []
+all_results = []
+seg_index = -1
 for l in lines:
     try: obj = json.loads(l)
     except json.JSONDecodeError: continue
     if obj.get("type") == "config":
         cfg = obj  # last config header wins (current segment)
+        seg_index += 1
     elif "run" in obj:
-        results.append(obj)
+        all_results.append(obj)
+
+# Budget/target apply to the CURRENT segment only — a re-init starts a fresh
+# optimization target, so prior segments' runs must not instantly cap it.
+results = [r for r in all_results if r.get("segment", 0) == seg_index] if seg_index >= 0 else all_results
 
 max_runs = num(cfg.get("maxRuns"))
 max_secs = num(cfg.get("maxSeconds"))

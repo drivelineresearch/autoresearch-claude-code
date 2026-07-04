@@ -41,10 +41,16 @@ for event in ("Stop", "PreCompact", "SessionStart", "UserPromptSubmit"):
     groups = hooks.get(event)
     if not groups:
         continue
-    kept = [g for g in groups
-            if not any("autoresearch-" in h.get("command", "") for h in g.get("hooks", []))]
-    if kept:
-        hooks[event] = kept
+    surviving = []
+    for g in groups:
+        # Surgically drop only the autoresearch-* commands, preserving any
+        # unrelated hooks the user may have combined into the same group.
+        g["hooks"] = [h for h in g.get("hooks", [])
+                      if "autoresearch-" not in h.get("command", "")]
+        if g["hooks"]:
+            surviving.append(g)
+    if surviving:
+        hooks[event] = surviving
     else:
         hooks.pop(event, None)
 if not hooks:

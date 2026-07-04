@@ -23,8 +23,8 @@ echo "An autonomous experiment loop is active here. Resume it — do not start o
 echo ""
 
 if [ -f "autoresearch.jsonl" ]; then
-  runs=$(grep -c '"run"' autoresearch.jsonl 2>/dev/null || echo 0)
-  kept=$(grep -c '"status":"keep"' autoresearch.jsonl 2>/dev/null || echo 0)
+  runs=$(grep -c '"run":' autoresearch.jsonl 2>/dev/null); runs=${runs:-0}
+  kept=$(grep -c '"status":"keep"' autoresearch.jsonl 2>/dev/null); kept=${kept:-0}
   echo "State: $runs runs logged, $kept kept. Full protocol + best result are in autoresearch.jsonl."
 fi
 

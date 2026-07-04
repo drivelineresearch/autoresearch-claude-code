@@ -97,9 +97,9 @@ The first line (and any re-initialization line) is a config header:
 
 Fields beyond the original four are the **budget and noise contract the Stop hook reads** (see "Loop enforcement" above):
 - `noiseFloor`: stddev of the primary metric across repeated baseline runs (see Setup step 6). Keep/discard compares deltas against this. `0` if unmeasured.
-- `maxRuns`: hard cap on total runs before the loop auto-pauses. **Always set this** (default 200) so an unattended overnight run can't burn unbounded metered budget. `null` = unlimited (only for cheap benchmarks you're watching).
-- `maxSeconds`: wall-clock budget from `startedAt`. `null` = none.
-- `targetMetric`: stop once the best kept metric reaches this (respecting `bestDirection`). `null` = keep optimizing.
+- `maxRuns`: cap on runs **in the current segment** before the loop auto-pauses. **Always set this** (default 200) so an unattended overnight run can't burn unbounded metered budget. `null` = unlimited (only for cheap benchmarks you're watching). Re-initializing (a new segment) gives a fresh count, so prior segments never instantly cap a new target.
+- `maxSeconds`: wall-clock budget from this segment's `startedAt`. `null` = none.
+- `targetMetric`: stop once the current segment's best kept metric reaches this (respecting `bestDirection`). `null` = keep optimizing.
 - `startedAt`: Unix epoch when the segment began (`date +%s`), used for `maxSeconds`.
 
 Rules:
