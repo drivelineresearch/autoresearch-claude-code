@@ -29,7 +29,7 @@ Then tell the user autoresearch mode is paused. It can be resumed by running `/a
 
 ### If arguments = "status"
 
-Read-only. Do NOT run experiments or change state. Print a concise status:
+Read-only. **First, if a live session exists (`autoresearch.md` present and no `.autoresearch-off`), run `touch .autoresearch-inspect`** — this one-shot sentinel lets the Stop hook end this inspection turn cleanly instead of bouncing you into the next experiment. Then do NOT run experiments or change state. Print a concise status:
 1. `cat autoresearch-dashboard.md` if it exists (the pre-rendered table).
 2. Otherwise reconstruct from `autoresearch.jsonl`: total runs vs `maxRuns`, kept/discarded/crashed/checks_failed counts, baseline, current best (metric + which run + Δ%), noise floor, and whether `.autoresearch-off` is set (paused) or the loop is live.
 3. Show the last 3 worklog entries from `experiments/worklog.md`.
@@ -37,7 +37,7 @@ Then stop — this is a report, not a resume.
 
 ### If arguments = "report"
 
-Read-only final report. Write `autoresearch-report.md` summarizing the session: objective, baseline → best (with %), the winning configuration/diff summary, what classes of change worked vs. failed (from the worklog meta-reviews), and any open ideas from `autoresearch.ideas.md`. Then print its path. Do NOT resume the loop.
+Read-only final report. **First, if a live session exists (`autoresearch.md` present and no `.autoresearch-off`), run `touch .autoresearch-inspect`** so the Stop hook lets this turn end cleanly. Write `autoresearch-report.md` summarizing the session: objective, baseline → best (with %), the winning configuration/diff summary, what classes of change worked vs. failed (from the worklog meta-reviews), and any open ideas from `autoresearch.ideas.md`. Then print its path. Do NOT resume the loop.
 
 ### If `autoresearch.md` exists in the current directory (resume)
 

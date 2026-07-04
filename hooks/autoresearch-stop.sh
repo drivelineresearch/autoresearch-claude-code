@@ -27,6 +27,15 @@ cwd=$(printf '%s' "$input" | python3 -c 'import json,sys;print(json.load(sys.std
 # Not an autoresearch session, or explicitly paused → allow the stop.
 [ -f "autoresearch.md" ] || exit 0
 [ -f ".autoresearch-off" ] && exit 0
+
+# One-shot inspection escape hatch: a read-only turn (`/autoresearch status|report`)
+# sets this sentinel so it can end cleanly instead of being bounced into the next
+# experiment. Consume it here (self-cleaning) and allow this single stop.
+if [ -f ".autoresearch-inspect" ]; then
+  rm -f ".autoresearch-inspect"
+  exit 0
+fi
+
 [ -f "autoresearch.jsonl" ] || exit 0
 
 # Ask Python for a decision: "stop <reason>" to allow termination, or "" to continue.

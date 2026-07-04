@@ -11,7 +11,7 @@ Autonomous experiment loop: try ideas, keep what works, discard what doesn't, ne
 
 Four plugin hooks turn "please keep looping" into mechanism. You don't call them — they fire automatically — but you must produce the state they read (`autoresearch.md`, `autoresearch.jsonl`, `experiments/worklog.md`):
 
-- **Stop hook** — the loop engine. On every turn-end it vetoes the stop and feeds you the next instruction, *unless* a budget boundary is hit (`maxRuns`/`maxSeconds`/`targetMetric` in the config header) or `.autoresearch-off` exists. This is why you never have to ask "should I continue?" — you can't accidentally end the loop; only a real budget or `/autoresearch off` ends it.
+- **Stop hook** — the loop engine. On every turn-end it vetoes the stop and feeds you the next instruction, *unless* a budget boundary is hit (`maxRuns`/`maxSeconds`/`targetMetric` in the config header) or `.autoresearch-off` exists. This is why you never have to ask "should I continue?" — you can't accidentally end the loop; only a real budget or `/autoresearch off` ends it. (Read-only `/autoresearch status`/`report` turns set a one-shot `.autoresearch-inspect` sentinel so they can end cleanly without triggering an experiment.)
 - **PreCompact hook** — snapshots `autoresearch.jsonl` and writes a checkpoint to the worklog before context compaction, so nothing is lost.
 - **SessionStart hook** — on resume/compaction, re-injects the objective + best result + recent worklog so a fresh agent continues instead of restarting.
 - **UserPromptSubmit hook** — reinjects context and carries user *steers* mid-loop.
