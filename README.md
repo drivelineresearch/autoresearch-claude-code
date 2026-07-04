@@ -1,5 +1,7 @@
 # autoresearch-claude-code
 
+![autoresearch — autonomous experiment loop for Claude Code](imgs/autoresearch-banner.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://docs.anthropic.com/en/docs/claude-code)
 
