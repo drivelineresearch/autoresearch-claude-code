@@ -52,6 +52,13 @@ normally; no separate API integration or key storage is added. Check
 The implementation was checked against local CLI 0.153.4; deprecated `--full-auto`
 is not used. Account, model, network, and host policy still determine availability.
 
+The runner adds the selected repository's exact Git metadata directories with
+`--add-dir` so a keep can commit despite the default `.git` protection. A linked
+worktree also needs its common Git directory for objects and refs; this metadata
+is shared across that repository's worktrees. Use a separate clone for stronger
+repository isolation. The grant does not include other source worktrees or the
+home directory, and the runner rejects broad workspace/ancestor grants.
+
 ## Boundaries and recovery
 
 - Defaults: at most 20 invocations, 3600 supervisor seconds, 900 seconds per turn.
@@ -82,9 +89,11 @@ such as WSL. Tests use a fake Codex CLI to exercise progress, errors, cancellati
 locking, and budget boundaries. Real authenticated model execution is a separate
 integration check and must be reported separately from those tests.
 
-During the 2026-09-07 integration check on the development host, the model started
-but could not execute commands because its sandbox reported
-`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. The supervisor
-detected no result, returned 2, and paused without changing the candidate or
-retrying. An authenticated keep/commit cycle remains unverified; it needs a host
-where the Codex sandbox works. No sandbox bypass was added to work around this.
+The 2026-09-07 development-host check initially failed with
+`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. Loading Ubuntu's
+dedicated Bubblewrap AppArmor profile resolved it while retaining the global
+user-namespace restriction. With scoped Git metadata writes, the authenticated
+rerun completed one keep/commit/log cycle and stopped at its run cap. Independent
+checks confirmed the score, commit, unchanged harness/history, and clean worktree;
+outside-workspace, `.codex`, and network restrictions remained enforced in sandbox
+probes. See the [repair and verification report](../../../docs/codex-sandbox.md).

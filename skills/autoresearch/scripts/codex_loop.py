@@ -76,6 +76,21 @@ def preflight(root):
     return branch
 
 
+def git_metadata_roots(root):
+    """Grant Git's metadata directories, including a linked worktree's common dir."""
+    directories = []
+    for options in (("--absolute-git-dir",), ("--path-format=absolute", "--git-common-dir")):
+        path = Path(git(root, "rev-parse", *options))
+        if not path.is_absolute() or not path.is_dir():
+            raise LoopError("Git metadata must resolve to an existing absolute directory")
+        path = path.resolve()
+        if root.is_relative_to(path):
+            raise LoopError("refusing to grant Git metadata access to the workspace or its ancestors")
+        if path not in directories:
+            directories.append(path)
+    return directories
+
+
 def protected_hashes(root, paths):
     hashes = {}
     for name in paths:
@@ -197,6 +212,7 @@ def main(argv=None):
             print(json.dumps({**state, "paused": is_paused(root)}, indent=2, allow_nan=False))
             return 0
         branch = preflight(root)
+        metadata_roots = git_metadata_roots(root)
         paths = list(dict.fromkeys(["autoresearch.sh", "checks.sh", *args.protect]))
         for name in args.protect:
             if not (root / name).is_file():
@@ -209,6 +225,10 @@ def main(argv=None):
             raise LoopError(state["budget_reason"])
         command = ["codex", "exec", "--cd", str(root), "--sandbox", "workspace-write",
                    "-c", 'approval_policy="never"', "--ephemeral", "--json"]
+        # workspace-write protects .git by default. Keeps need the index, objects,
+        # and refs writable; never widen this grant to a parent checkout or home.
+        for path in metadata_roots:
+            command += ["--add-dir", str(path)]
         if args.model:
             command += ["--model", args.model]
         if args.dry_run:
@@ -244,6 +264,8 @@ def main(argv=None):
                 return 0
             if preflight(root) != branch:
                 raise LoopError("experiment branch changed")
+            if git_metadata_roots(root) != metadata_roots:
+                raise LoopError("Git metadata directories changed")
             if protected_hashes(root, paths) != hashes:
                 raise LoopError("locked harness changed; review and re-baseline")
             remaining = deadline - time.monotonic()
@@ -282,6 +304,8 @@ def main(argv=None):
                 raise LoopError("locked harness changed; recorded result requires review")
             if preflight(root) != branch:
                 raise LoopError("experiment branch changed")
+            if git_metadata_roots(root) != metadata_roots:
+                raise LoopError("Git metadata directories changed")
             history = after_history
             if after["budget_reached"]:
                 pause(root, after["budget_reason"])

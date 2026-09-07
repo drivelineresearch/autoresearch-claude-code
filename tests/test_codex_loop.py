@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 RUNNER = Path(__file__).resolve().parents[1] / "skills" / "autoresearch" / "scripts" / "codex_loop.py"
 
@@ -100,10 +101,42 @@ class CodexLoopTests(unittest.TestCase):
         calls = [json.loads(line) for line in (self.root / "invocations").read_text().splitlines()]
         self.assertEqual(len(calls), 3)
         self.assertIn("workspace-write", calls[0])
+        self.assertIn('approval_policy="never"', calls[0])
+        grants = [calls[0][i + 1] for i, arg in enumerate(calls[0]) if arg == "--add-dir"]
+        self.assertEqual(grants, [str(self.root / ".git")])
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", calls[0])
         self.assertEqual(calls[0][-1], "-")
         self.assertTrue((self.root / ".autoresearch-off").exists())
         self.assertEqual((self.root / "code.txt").read_text(), "original")
+
+    def test_linked_worktree_grants_only_its_git_metadata_and_common_directory(self):
+        original = self.root
+        linked_temp = tempfile.TemporaryDirectory(prefix="ar linked worktree ")
+        self.addCleanup(linked_temp.cleanup)
+        linked = Path(linked_temp.name) / "experiment"
+        self.git("worktree", "add", "-q", "-b", "linked-experiment", str(linked))
+        for name in ("autoresearch.md", "autoresearch.sh", "autoresearch.jsonl"):
+            (linked / name).write_bytes((original / name).read_bytes())
+        self.root = linked
+        result = self.run_loop("--max-turns", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = json.loads((linked / "invocations").read_text())
+        grants = [call[i + 1] for i, arg in enumerate(call) if arg == "--add-dir"]
+        metadata = self.git("rev-parse", "--absolute-git-dir").stdout.strip()
+        self.assertEqual(grants, [metadata, str(original / ".git")])
+        self.assertNotIn(str(original), grants)
+        self.assertNotIn(str(linked), grants)
+        self.assertIn("workspace-write", call)
+        self.assertIn('approval_policy="never"', call)
+
+    def test_git_metadata_grants_reject_missing_directories_and_workspace_ancestors(self):
+        spec = importlib.util.spec_from_file_location("codex_loop_git_test", RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        for path in (self.root, self.root.parent, Path("/"), self.root / "absent"):
+            with self.subTest(path=path), mock.patch.object(runner, "git", return_value=str(path)):
+                with self.assertRaises(runner.LoopError):
+                    runner.git_metadata_roots(self.root)
 
     def test_max_turns(self):
         result = self.run_loop("--max-turns", "1")

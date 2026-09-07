@@ -52,7 +52,8 @@ invocation reads durable state, performs one experiment, and ends. It checks:
 - Protected harness hashes, unchanged branch, and clean final workspace.
 - Single-supervisor lock, process timeout/cancellation, failure status and logs.
 
-It uses the workspace-write sandbox and never enables a blanket sandbox bypass.
+It uses the workspace-write sandbox with exact repository Git metadata write
+roots for commits, and never enables a blanket sandbox bypass.
 `--status` and `--dry-run` provide inspection before model execution. See the
 [Codex operation guide](../skills/autoresearch/references/codex.md).
 
@@ -83,8 +84,8 @@ checks do not guarantee optional GPU/model package behavior.
 
 ## 4. Validation
 
-Final combined validation: **92 unique tests passed, no skips, in 26.681 seconds**:
-33 state/hook tests, 22 installer tests, 15 Codex-supervisor tests, and 22 example
+Final combined validation: **94 unique tests passed, no skips, in 27.872 seconds**:
+33 state/hook tests, 22 installer tests, 17 Codex-supervisor tests, and 22 example
 tests. The scientific test environment used CPU XGBoost 3.4.1 and scikit-learn
 1.8.0, with no GPU/model-weight or dataset download. A synthetic full example
 entrypoint also emitted two finite metrics and generated four expected plots.
@@ -102,14 +103,21 @@ example uv environment to exercise scientific tests rather than skip them.
 GitHub Actions is configured with immutable action revisions and read-only
 repository permissions. CI execution itself requires publishing this branch.
 
-An authenticated Codex CLI 0.153.4 integration check used an isolated temporary
-repository containing a deterministic baseline and one proposed candidate. The
-model started, but command execution failed before any experiment with
-`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. The runner detected
-the missing result, exited 2, wrote the pause sentinel, and preserved the original
-candidate, commit, and baseline ledger; it did not retry. This validates failure
-handling with the real CLI, **not** a successful authenticated keep/commit cycle.
-Recheck that path on a host with a working Codex sandbox before unattended use.
+The first authenticated Codex CLI 0.153.4 check failed before commands with
+`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`; the runner correctly
+paused without modifying the candidate or retrying. A subsequent repair loaded
+Ubuntu's missing Bubblewrap-specific AppArmor profile while retaining the global
+user-namespace restriction. Native sandbox probes then exposed and verified the
+need for scoped Git metadata writes, now handled by the runner's `--add-dir` flags.
+
+The authenticated rerun **passed the complete keep/commit/log cycle**: exactly one
+candidate commit and one new kept result, benchmark/check success, preserved
+scorer and ledger history, updated dashboard/worklog, clean worktree, and automatic
+pause at 2/2 logged runs. Independent benchmark/check reruns confirmed the result.
+Standalone and linked-worktree sandbox probes also verified that metadata grants
+leave other workspace, `.codex`, and network boundaries in place. This is a
+synthetic integration fixture, not an ML performance result. Exact host repair,
+evidence, scope, and rollback are in [codex-sandbox.md](codex-sandbox.md).
 
 ## 5. Remaining work, in order
 

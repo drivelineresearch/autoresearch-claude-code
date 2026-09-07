@@ -150,8 +150,8 @@ packages are absent. To exercise them: `uv sync --project examples`, then
 CI runs core tests on Linux/macOS and the example suite with core dependencies.
 Fake-CLI tests validate supervisor behavior; authenticated Codex runs and optional
 GPU/model backends require separate integration checks.
-The attempted real Codex check on this development host was blocked by a `bwrap`
-sandbox error before commands ran; the runner paused correctly. A successful
-authenticated keep/commit cycle remains unverified (details in the review).
+The real Codex keep/commit/log cycle is now verified after repairing this host's
+Ubuntu AppArmor profile and granting scoped Git metadata writes. Sandbox boundary
+checks also passed. See the [sandbox repair and verification report](docs/codex-sandbox.md).
 
 Contributor guidance: [AGENTS.md](AGENTS.md). License: [MIT](LICENSE).
