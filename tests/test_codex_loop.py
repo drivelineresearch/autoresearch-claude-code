@@ -69,6 +69,10 @@ class CodexLoopTests(unittest.TestCase):
         fake.chmod(0o755)
         self.env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}")
         self.git("init", "-q")
+        # Background Git maintenance can remove its own lock during snapshots.
+        # Keep fixture changes attributable to the operation under test.
+        self.git("config", "maintenance.auto", "false")
+        self.git("config", "gc.auto", "0")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Test")
         self.git("checkout", "-b", "experiment")
