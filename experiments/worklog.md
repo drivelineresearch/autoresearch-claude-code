@@ -1,5 +1,13 @@
 # Autoresearch Worklog: Fastball Velocity Prediction
 
+> Historical record, reviewed 2026-09-07. These scores do not establish a
+> like-for-like validated improvement. Runs 5 onward used feature selection
+> informed by held-out data; run 14's attempt to remove that leakage was discarded.
+> Run 16 changed sample aggregation, and run 18 changed the cross-validation
+> protocol. The original narrative below is preserved for provenance, including
+> conclusions that should not be used as current methodological guidance. The
+> corrected example requires a new baseline under a fixed evaluation protocol.
+
 ## Session: 2026-03-12
 
 ### Setup (23:00)

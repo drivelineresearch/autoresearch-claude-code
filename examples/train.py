@@ -2,11 +2,12 @@
 """Fastball velocity prediction from biomechanical POI metrics.
 
 Uses the autoresearch model zoo (models.py) — 19 models across 6 categories.
-Change MODEL_TYPE and MODEL_PARAMS below to switch models.
+Edit candidate.py to propose model and feature changes; keep this evaluator fixed.
 """
 
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -14,11 +15,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, PredefinedSplit
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import LabelEncoder
 from sklearn.inspection import permutation_importance
-import xgboost as xgb
 
-from models import build_model, USE_GPU
+try:  # Support both `python examples/train.py` and module imports.
+    from .models import build_model, USE_GPU
+    from . import candidate
+except ImportError:
+    from models import build_model, USE_GPU
+    import candidate
 
 # ---------------------------------------------------------------------------
 # Rich TUI (graceful fallback to plain text)
@@ -45,27 +49,26 @@ def info(msg):
 
 
 # ---------------------------------------------------------------------------
-# Config — the autoresearch agent modifies these
+# Evaluation contract — fixed within a research session
 # ---------------------------------------------------------------------------
 
 SEED = int(os.environ.get("AR_SEED", "42"))  # autoresearch.sh passes SEED for noise-floor / confirm re-runs
-DATA_PATH = "third_party/openbiomechanics/baseball_pitching/data/poi/poi_metrics.csv"
-PLOT_DIR = "plots"
+EXAMPLE_DIR = Path(__file__).resolve().parent
+DATA_PATH = Path(os.environ.get("AR_DATA_PATH", EXAMPLE_DIR / "third_party/openbiomechanics/baseball_pitching/data/poi/poi_metrics.csv"))
+METADATA_PATH = Path(os.environ.get("AR_METADATA_PATH", DATA_PATH.parent.parent / "metadata.csv"))
+PLOT_DIR = Path(os.environ.get("AR_PLOT_DIR", EXAMPLE_DIR / "plots"))
 N_FOLDS = 5
 
-# --- Model Selection ---
-# See models.py for full list: xgboost, catboost, lightgbm, histgb,
-# pytorch_mlp, mc_dropout, ft_transformer, tabpfn, tabnet, mlp,
-# ridge, elasticnet, lasso, huber, bayesian_ridge, gp, svr, knn, stacking
-MODEL_TYPE = "xgboost"
-MODEL_PARAMS = {}  # override default hyperparameters; empty = use model defaults
+# Candidate settings are read on each process launch. Keep changes in candidate.py.
+MODEL_TYPE = candidate.MODEL_TYPE
+MODEL_PARAMS = candidate.MODEL_PARAMS
+TOP_N_FEATURES = candidate.TOP_N_FEATURES
 
-DROP_COLS = ["session_pitch", "session", "pitch_type", "pitch_speed_mph"]
+DROP_COLS = ["session_pitch", "session", "user", "pitch_type", "pitch_speed_mph"]
 TARGET = "pitch_speed_mph"
-GROUP_COL = "session"
+GROUP_COL = "user"
 
 AGGREGATE_TO_PLAYER = True
-TOP_N_FEATURES = 15
 USE_LOGO = True
 
 
@@ -74,74 +77,81 @@ USE_LOGO = True
 # ---------------------------------------------------------------------------
 
 def load_data():
+    """Load POI metrics and validate the pitch-to-athlete mapping before splitting."""
     df = pd.read_csv(DATA_PATH)
-    le = LabelEncoder()
-    df["p_throws"] = le.fit_transform(df["p_throws"])
+    required = {"session_pitch", "session", "p_throws", "pitch_type", TARGET}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing required POI columns: {sorted(missing)}")
+    if df["session_pitch"].isna().any() or df["session_pitch"].duplicated().any():
+        raise ValueError("POI session_pitch identifiers must be present and unique")
+    metadata = pd.read_csv(METADATA_PATH, usecols=["session_pitch", GROUP_COL])
+    if metadata.isna().any().any() or metadata["session_pitch"].duplicated().any():
+        raise ValueError("Metadata must map each session_pitch to exactly one athlete")
+    if GROUP_COL in df:
+        raise ValueError(f"POI must not duplicate the metadata athlete column {GROUP_COL!r}")
+    df = df.merge(metadata, on="session_pitch", how="left", validate="one_to_one")
+    if df[GROUP_COL].isna().any():
+        raise ValueError("Metadata does not identify the athlete for every POI pitch")
+    if df["session"].isna().any() or (df.groupby("session")[GROUP_COL].nunique() > 1).any():
+        raise ValueError("Each session must identify exactly one athlete")
+    if not df["pitch_type"].eq("FF").all():
+        raise ValueError("This benchmark expects fastballs (pitch_type=FF) only")
+    handedness = df["p_throws"].map({"L": 0, "R": 1})
+    if handedness.isna().any():
+        raise ValueError("p_throws must contain only L or R")
+    df["p_throws"] = handedness
+    if not np.isfinite(pd.to_numeric(df[TARGET], errors="coerce")).all():
+        raise ValueError("Target values must all be finite numbers")
+    df[TARGET] = pd.to_numeric(df[TARGET])
 
     if AGGREGATE_TO_PLAYER:
-        numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c != GROUP_COL]
+        # Drop all identifiers before averaging: numeric IDs are not features.
+        numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns
+                        if c not in set(DROP_COLS) | {GROUP_COL} or c == TARGET]
         agg_df = df.groupby(GROUP_COL)[numeric_cols].mean().reset_index()
-        std_cols = ["elbow_transfer_fp_br", "shoulder_transfer_fp_br",
-                    "thorax_distal_transfer_fp_br"]
-        for col in std_cols:
-            if col in df.columns:
+        for col in ["elbow_transfer_fp_br", "shoulder_transfer_fp_br",
+                    "thorax_distal_transfer_fp_br"]:
+            if col in df:
                 std_series = df.groupby(GROUP_COL)[col].std().fillna(0)
                 agg_df[f"{col}_std"] = agg_df[GROUP_COL].map(std_series)
         df = agg_df
 
-    groups = df[GROUP_COL]
-    y = df[TARGET].values
-    drop = [c for c in DROP_COLS if c in df.columns]
-    X = df.drop(columns=drop)
+    groups = df[GROUP_COL].reset_index(drop=True)
+    y = df[TARGET].to_numpy()
+    X = df.drop(columns=list(set(DROP_COLS) | {TARGET, GROUP_COL}), errors="ignore").copy()
 
-    # Feature engineering: kinetic chain ratios
-    _FE_COLS = ["elbow_transfer_fp_br", "shoulder_transfer_fp_br",
-                "thorax_distal_transfer_fp_br", "pelvis_lumbar_transfer_fp_br",
-                "max_torso_rotational_velo", "max_pelvis_rotational_velo",
-                "lead_grf_mag_max", "rear_grf_mag_max",
-                "shoulder_internal_rotation_moment", "elbow_varus_moment"]
-    _missing = [c for c in _FE_COLS if c not in X.columns]
-    if _missing:
-        info(f"Warning: missing expected columns for feature engineering: {_missing}")
-
-    eps = 1e-6
-    X["thorax_to_elbow_transfer_ratio"] = X["thorax_distal_transfer_fp_br"] / (X["elbow_transfer_fp_br"] + eps)
-    X["shoulder_to_elbow_transfer_ratio"] = X["shoulder_transfer_fp_br"] / (X["elbow_transfer_fp_br"] + eps)
-    X["pelvis_to_thorax_transfer_ratio"] = X["pelvis_lumbar_transfer_fp_br"] / (X["thorax_distal_transfer_fp_br"] + eps)
-    X["torso_to_pelvis_rot_ratio"] = X["max_torso_rotational_velo"] / (X["max_pelvis_rotational_velo"] + eps)
-    X["total_energy_transfer"] = (X["shoulder_transfer_fp_br"] + X["elbow_transfer_fp_br"] +
-                                   X["thorax_distal_transfer_fp_br"] + X["pelvis_lumbar_transfer_fp_br"])
-    X["grf_lead_rear_ratio"] = X["lead_grf_mag_max"] / (X["rear_grf_mag_max"] + eps)
-    X["moment_ratio"] = X["shoulder_internal_rotation_moment"] / (X["elbow_varus_moment"] + eps)
-
+    # Candidate transforms receive features only, after target/ID exclusion.
+    original_index = X.index.copy()
+    X = candidate.engineer_features(X)
+    if not isinstance(X, pd.DataFrame) or not X.index.equals(original_index):
+        raise ValueError("Candidate features must preserve the DataFrame row order and index")
+    if X.columns.duplicated().any() or set(X.columns) & (set(DROP_COLS) | {TARGET, GROUP_COL}):
+        raise ValueError("Candidate features must have unique columns and exclude targets/identifiers")
+    if X.empty or not all(pd.api.types.is_numeric_dtype(dtype) for dtype in X.dtypes):
+        raise ValueError("Features must be a nonempty numeric table; explicitly encode or drop other columns")
+    if not np.isfinite(X.to_numpy(dtype=float)).all():
+        raise ValueError("Features contain missing/infinite values; add training-fold-only imputation before fitting")
     return X, y, groups
 
 
 # ---------------------------------------------------------------------------
-# Feature selection (always uses XGBoost for importance ranking)
+# Feature selection: fit exclusively on each outer training fold
 # ---------------------------------------------------------------------------
 
 def select_features(X, y, groups):
-    """First pass: quick XGBoost to rank features by importance."""
-    gkf = GroupKFold(n_splits=N_FOLDS)
-    fold_importances = []
-    quick_params = {
+    """Rank only the supplied training data; never inspect outer held-out labels."""
+    if TOP_N_FEATURES is None or TOP_N_FEATURES >= X.shape[1]:
+        return X.columns.tolist()
+    if TOP_N_FEATURES < 1:
+        raise ValueError("TOP_N_FEATURES must be positive or None")
+    ranker, _ = build_model("xgboost", {
         "n_estimators": 200, "max_depth": 4, "learning_rate": 0.03,
-        "subsample": 0.7, "colsample_bytree": 0.7, "min_child_weight": 5,
-        "reg_alpha": 0.5, "reg_lambda": 2.0, "random_state": SEED,
-    }
-
-    for train_idx, val_idx in gkf.split(X, y, groups):
-        model = xgb.XGBRegressor(**quick_params)
-        model.fit(X.iloc[train_idx], y[train_idx],
-                  eval_set=[(X.iloc[val_idx], y[val_idx])], verbose=False,
-                  early_stopping_rounds=20)
-        fold_importances.append(
-            pd.Series(model.feature_importances_, index=X.columns)
-        )
-
-    avg_imp = pd.concat(fold_importances, axis=1).mean(axis=1).sort_values(ascending=False)
-    return avg_imp.head(TOP_N_FEATURES).index.tolist(), avg_imp
+        "n_jobs": 1,
+    }, random_state=SEED)
+    ranker.fit(X, y)
+    importance = pd.Series(ranker.feature_importances_, index=X.columns)
+    return importance.sort_values(ascending=False, kind="stable").head(TOP_N_FEATURES).index.tolist()
 
 
 # ---------------------------------------------------------------------------
@@ -149,132 +159,88 @@ def select_features(X, y, groups):
 # ---------------------------------------------------------------------------
 
 def cross_validate(X, y, groups):
-    top_features, full_importance = select_features(X, y, groups)
-    X_selected = X[top_features]
+    """Compute pooled out-of-fold metrics with athlete-disjoint outer folds.
 
+    The evaluation fold is never an early-stopping set. Models use fixed fit
+    budgets; optional early stopping must be implemented with a separate inner
+    athlete split. Repeated optimization on this CV score still requires a final
+    untouched cohort before making a generalization claim.
+    """
+    y = np.asarray(y)
+    groups = pd.Series(np.asarray(groups))
+    if len(X) != len(y) or len(y) != len(groups):
+        raise ValueError("X, y, and groups must have the same length")
+    if len(y) < 2 or groups.isna().any() or groups.nunique() < 2:
+        raise ValueError("Cross-validation needs at least two nonmissing athlete groups")
+    if not np.isfinite(y).all() or np.ptp(y) == 0:
+        raise ValueError("R2 requires a finite, nonconstant target")
+    if not USE_LOGO and not 2 <= N_FOLDS <= groups.nunique():
+        raise ValueError("N_FOLDS must be between 2 and the number of athlete groups")
     cv = LeaveOneGroupOut() if USE_LOGO else GroupKFold(n_splits=N_FOLDS)
-    splits = list(cv.split(X_selected, y, groups))
-    n_folds = len(splits)
-
-    oof_preds = np.zeros(len(y))
-    oof_uncertainties = np.zeros(len(y))
+    splits = list(cv.split(X, y, groups))
+    oof_preds = np.full(len(y), np.nan)
+    oof_uncertainties = np.full(len(y), np.nan)
     fold_importances = []
-
-    # Progress bar (rich) or plain counter
+    progress = None
     if HAS_RICH:
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(),
-            TextColumn("{task.completed}/{task.total}"),
-            TimeElapsedColumn(),
-            console=console,
-        )
-        task = progress.add_task(f"CV ({MODEL_TYPE})", total=n_folds)
+        progress = Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(),
+                            TextColumn("{task.completed}/{task.total}"),
+                            TimeElapsedColumn(), console=console)
+        task = progress.add_task(f"CV ({MODEL_TYPE})", total=len(splits))
         progress.start()
-    else:
-        progress = None
-
-    for fold, (train_idx, val_idx) in enumerate(splits):
-        X_train, X_val = X_selected.iloc[train_idx], X_selected.iloc[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
-
-        model, meta = build_model(MODEL_TYPE, MODEL_PARAMS)
-
-        # --- Fit with model-appropriate arguments ---
-        fit_kwargs = {}
-
-        if meta.get("supports_eval_set"):
-            if MODEL_TYPE == "xgboost":
-                fit_kwargs["eval_set"] = [(X_val, y_val)]
-                fit_kwargs["verbose"] = False
-                fit_kwargs["early_stopping_rounds"] = 50
-            elif MODEL_TYPE == "catboost":
-                fit_kwargs["eval_set"] = (X_val, y_val)
-            elif MODEL_TYPE == "lightgbm":
-                import lightgbm as lgb
-                fit_kwargs["eval_set"] = [(X_val, y_val)]
-                fit_kwargs["callbacks"] = [lgb.early_stopping(50), lgb.log_evaluation(0)]
-            elif MODEL_TYPE in ("pytorch_mlp", "mc_dropout", "ft_transformer"):
-                # PyTorch wrappers: eval_set passed to inner pipeline step.
-                # The Pipeline's StandardScaler transforms X_train but not eval_set,
-                # so we must pre-scale X_val to match what the inner model sees.
-                # NOTE: This works because both this scaler and the Pipeline's scaler
-                # are StandardScaler fit on the same X_train. If the Pipeline gains
-                # other preprocessing steps, this must be updated to match.
-                from sklearn.preprocessing import StandardScaler as _SS
-                _scaler = _SS().fit(X_train)
-                X_val_scaled = pd.DataFrame(
-                    _scaler.transform(X_val), columns=X_val.columns, index=X_val.index
-                )
-                step_name = {"pytorch_mlp": "mlp", "mc_dropout": "mc",
-                             "ft_transformer": "ftt"}[MODEL_TYPE]
-                fit_kwargs[f"{step_name}__eval_set"] = [(X_val_scaled, y_val)]
-            elif MODEL_TYPE == "tabnet":
-                # TabNet Pipeline has StandardScaler — pre-scale eval_set
-                from sklearn.preprocessing import StandardScaler as _SS
-                _scaler_tn = _SS().fit(X_train)
-                X_val_scaled_tn = _scaler_tn.transform(X_val)
-                fit_kwargs["tabnet__eval_set"] = [(X_val_scaled_tn, y_val.reshape(-1, 1))]
-                fit_kwargs["tabnet__eval_name"] = ["val"]
-                fit_kwargs["tabnet__eval_metric"] = ["rmse"]
-
-        # Stacking: inject group-aware inner CV
-        if meta.get("is_stacking"):
-            inner_gkf = GroupKFold(n_splits=min(5, len(np.unique(groups.iloc[train_idx]))))
-            test_fold = np.full(len(train_idx), -1)
-            for i, (_, inner_val) in enumerate(inner_gkf.split(
-                    X_train, y_train, groups.iloc[train_idx])):
-                test_fold[inner_val] = i
-            model.cv = PredefinedSplit(test_fold)
-
-        model.fit(X_train, y_train, **fit_kwargs)
-        oof_preds[val_idx] = model.predict(X_val)
-
-        # --- Uncertainty ---
-        if MODEL_TYPE == "mc_dropout":
-            # Extract uncertainty from the inner MC model
-            inner = model.named_steps.get("mc")
-            if inner and hasattr(inner, "uncertainty_"):
-                oof_uncertainties[val_idx] = inner.uncertainty_
-        elif MODEL_TYPE == "gp":
-            gp_step = model.named_steps.get("gp")
-            scaler_step = model.named_steps.get("scaler")
-            if gp_step and scaler_step:
-                X_val_scaled = scaler_step.transform(X_val)
-                _, std = gp_step.predict(X_val_scaled, return_std=True)
+    try:
+        for train_idx, val_idx in splits:
+            features = select_features(X.iloc[train_idx], y[train_idx], groups.iloc[train_idx])
+            X_train, X_val = X.iloc[train_idx][features], X.iloc[val_idx][features]
+            y_train, y_val = y[train_idx], y[val_idx]
+            model, meta = build_model(MODEL_TYPE, MODEL_PARAMS, random_state=SEED)
+            if meta.get("is_stacking"):
+                n_inner = min(5, groups.iloc[train_idx].nunique())
+                if n_inner < 2:
+                    raise ValueError("Stacking requires at least three outer athlete groups")
+                inner = GroupKFold(n_splits=n_inner)
+                test_fold = np.full(len(train_idx), -1)
+                for i, (_, inner_val) in enumerate(inner.split(X_train, y_train, groups.iloc[train_idx])):
+                    test_fold[inner_val] = i
+                model.cv = PredefinedSplit(test_fold)
+            # No outer held-out targets enter fit, including early stopping.
+            model.fit(X_train, y_train)
+            predictions = np.asarray(model.predict(X_val)).reshape(-1)
+            if predictions.shape != y_val.shape or not np.isfinite(predictions).all():
+                raise ValueError("Model predictions must be finite and match the validation rows")
+            oof_preds[val_idx] = predictions
+            if MODEL_TYPE == "mc_dropout":
+                oof_uncertainties[val_idx] = model.named_steps["mc"].uncertainty_
+            elif MODEL_TYPE in ("gp", "bayesian_ridge"):
+                name = "gp" if MODEL_TYPE == "gp" else "bayes"
+                scaled = model.named_steps["scaler"].transform(X_val)
+                _, std = model.named_steps[name].predict(scaled, return_std=True)
                 oof_uncertainties[val_idx] = std
-
-        # --- Feature importance ---
-        if meta.get("has_native_importance"):
-            imp_model = model
-            if hasattr(model, "named_steps"):
-                for step_name, step in model.named_steps.items():
-                    if hasattr(step, "feature_importances_"):
-                        imp_model = step
-                        break
-            fold_importances.append(
-                pd.Series(imp_model.feature_importances_, index=X_selected.columns)
-            )
-        else:
-            perm = permutation_importance(model, X_val, y_val,
-                                          n_repeats=10, random_state=SEED)
-            fold_importances.append(
-                pd.Series(perm.importances_mean, index=X_selected.columns)
-            )
-
+            if meta.get("has_native_importance"):
+                imp_model = model
+                if hasattr(model, "named_steps"):
+                    imp_model = next(step for step in model.named_steps.values()
+                                     if hasattr(step, "feature_importances_"))
+                fold_importances.append(pd.Series(imp_model.feature_importances_, index=features))
+            elif len(val_idx) > 1:
+                # R2 is undefined for singleton LOGO folds. MSE is defined, but
+                # singleton feature permutations cannot measure importance.
+                perm = permutation_importance(model, X_val, y_val, scoring="neg_mean_squared_error",
+                                              n_repeats=5, random_state=SEED)
+                fold_importances.append(pd.Series(perm.importances_mean, index=features))
+            if progress:
+                progress.update(task, advance=1)
+    finally:
         if progress:
-            progress.update(task, advance=1)
-
-    if progress:
-        progress.stop()
-
-    rmse = np.sqrt(mean_squared_error(y, oof_preds))
-    r2 = r2_score(y, oof_preds)
-    avg_importance = pd.concat(fold_importances, axis=1).mean(axis=1).sort_values(ascending=False)
-
-    has_uncertainty = oof_uncertainties.sum() > 0
-    return oof_preds, rmse, r2, avg_importance, (oof_uncertainties if has_uncertainty else None)
+            progress.stop()
+    if not np.isfinite(oof_preds).all():
+        raise ValueError("Every row must receive one finite out-of-fold prediction")
+    rmse = float(np.sqrt(mean_squared_error(y, oof_preds)))
+    r2 = float(r2_score(y, oof_preds))
+    importance = (pd.concat(fold_importances, axis=1).fillna(0).mean(axis=1)
+                  .sort_values(ascending=False) if fold_importances else pd.Series(dtype=float))
+    uncertainty = oof_uncertainties if np.isfinite(oof_uncertainties).all() else None
+    return oof_preds, rmse, r2, importance, uncertainty
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +249,9 @@ def cross_validate(X, y, groups):
 
 def plot_results(y, oof_preds, importance, rmse, r2, uncertainties=None):
     os.makedirs(PLOT_DIR, exist_ok=True)
+    if uncertainties is None:
+        # Do not leave a prior model's uncertainty artifact in the current run.
+        (Path(PLOT_DIR) / "uncertainty_calibration.png").unlink(missing_ok=True)
 
     # 1. Actual vs Predicted scatter
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -314,8 +283,12 @@ def plot_results(y, oof_preds, importance, rmse, r2, uncertainties=None):
     # 3. Feature importance (top 20)
     top = importance.head(20)
     fig, ax = plt.subplots(figsize=(8, 7))
-    top.sort_values().plot.barh(ax=ax)
-    ax.set_xlabel("Mean Feature Importance (gain)")
+    if not top.empty:
+        top.sort_values().plot.barh(ax=ax)
+    else:
+        ax.text(0.5, 0.5, "Importance unavailable for singleton held-out folds",
+                ha="center", va="center", transform=ax.transAxes)
+    ax.set_xlabel("Mean native importance or held-out permutation MSE increase")
     ax.set_title("Top 20 Feature Importances")
     fig.tight_layout()
     fig.savefig(f"{PLOT_DIR}/feature_importance.png", dpi=150)
@@ -339,8 +312,9 @@ def plot_results(y, oof_preds, importance, rmse, r2, uncertainties=None):
         ax.scatter(uncertainties, abs_errors, alpha=0.5, s=30, edgecolors="k", linewidth=0.5)
         ax.set_xlabel("Predicted Uncertainty (mph)")
         ax.set_ylabel("Absolute Error (mph)")
-        corr = np.corrcoef(uncertainties, abs_errors)[0, 1]
-        ax.set_title(f"Uncertainty Calibration (corr={corr:.3f})")
+        corr = (np.corrcoef(uncertainties, abs_errors)[0, 1]
+                if np.std(uncertainties) > 0 and np.std(abs_errors) > 0 else float("nan"))
+        ax.set_title(f"Uncertainty vs Error (descriptive corr={corr:.3f})")
         fig.tight_layout()
         fig.savefig(f"{PLOT_DIR}/uncertainty_calibration.png", dpi=150)
         plt.close(fig)

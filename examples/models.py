@@ -2,7 +2,7 @@
 
 Each model is registered with a build function returning (model_or_pipeline, metadata).
 The autoresearch agent reads this file to discover available models and their tunable
-hyperparameters. Modify MODEL_TYPE and MODEL_PARAMS in train.py to switch models.
+hyperparameters. Modify MODEL_TYPE and MODEL_PARAMS in candidate.py to switch models.
 
 Models are grouped by category:
   - boosting: xgboost, catboost, lightgbm, histgb
@@ -13,6 +13,8 @@ Models are grouped by category:
   - ensemble: stacking
 """
 
+import importlib.util
+import os
 import sys
 import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -25,7 +27,9 @@ from sklearn.preprocessing import StandardScaler
 # ---------------------------------------------------------------------------
 
 def detect_gpu():
-    """Return True if a CUDA GPU is available."""
+    """Detect CUDA for supported backends; AR_DEVICE=cpu disables auto-detection."""
+    if os.environ.get("AR_DEVICE", "auto") == "cpu":
+        return False
     try:
         import torch
         return torch.cuda.is_available()
@@ -79,7 +83,7 @@ def register(name, category):
     return decorator
 
 
-def build_model(model_type, params=None):
+def build_model(model_type, params=None, random_state=None):
     """Build a model by name.
 
     Returns (model_or_pipeline, metadata_dict).
@@ -96,6 +100,12 @@ def build_model(model_type, params=None):
         raise ValueError(f"Unknown MODEL_TYPE: {model_type}. Available: {available}")
     entry = _REGISTRY[model_type]
     model, meta = entry["builder"](params or {})
+    if random_state is not None:
+        # Seed every estimator, including pipeline and stacking children. The
+        # run's AR_SEED is authoritative over builder and MODEL_PARAMS defaults.
+        seeds = {key: random_state for key in model.get_params(deep=True)
+                 if key.rsplit("__", 1)[-1] in {"random_state", "random_seed", "seed"}}
+        model.set_params(**seeds)
     meta["category"] = entry["category"]
     return model, meta
 
@@ -106,19 +116,21 @@ def list_models():
 
 
 def check_available():
-    """Check which models can be instantiated (deps installed).
+    """Check dependency presence without importing frameworks or fetching weights.
 
-    Returns dict of {name: (available, category, error_or_None)}.
+    This is not a fit/GPU smoke test. Returns {name: (available, category, error)}.
     """
+    optional = {
+        "xgboost": "xgboost", "stacking": "xgboost", "catboost": "catboost",
+        "lightgbm": "lightgbm", "pytorch_mlp": "torch", "mc_dropout": "torch",
+        "ft_transformer": "torch", "tabpfn": "tabpfn", "tabnet": "pytorch_tabnet",
+    }
     results = {}
     for name, entry in _REGISTRY.items():
-        try:
-            entry["builder"]({})
-            results[name] = (True, entry["category"], None)
-        except ImportError as e:
-            results[name] = (False, entry["category"], str(e))
-        except Exception as e:
-            results[name] = (False, entry["category"], str(e))
+        dependency = optional.get(name)
+        missing = dependency and importlib.util.find_spec(dependency) is None
+        results[name] = (not missing, entry["category"],
+                         f"Install {dependency}" if missing else None)
     return results
 
 
@@ -135,13 +147,13 @@ def print_model_table():
         table.add_column("Category")
         table.add_column("Status")
         for name, (ok, cat, err) in sorted(avail.items(), key=lambda x: (x[1][1], x[0])):
-            status = "[green]ready[/green]" if ok else f"[red]missing:[/red] {err}"
+            status = "[green]deps installed[/green]" if ok else f"[red]missing:[/red] {err}"
             table.add_row(name, cat, status)
         console.print(table)
     except ImportError:
         print("Model Zoo:", file=sys.stderr)
         for name, (ok, cat, err) in sorted(avail.items(), key=lambda x: (x[1][1], x[0])):
-            status = "ready" if ok else f"missing: {err}"
+            status = "deps installed" if ok else f"missing: {err}"
             print(f"  {name:20s} {cat:10s} {status}", file=sys.stderr)
 
 
@@ -149,8 +161,8 @@ def print_model_table():
 # PyTorch sklearn-compatible wrappers
 # ===========================================================================
 
-class TorchMLPRegressor(BaseEstimator, RegressorMixin):
-    """PyTorch MLP with dropout, batch norm, AdamW, and early stopping.
+class TorchMLPRegressor(RegressorMixin, BaseEstimator):
+    """PyTorch MLP with dropout, layer norm, AdamW, and optional early stopping.
 
     Sklearn-compatible: implements fit(X, y) and predict(X).
     Tunable: hidden_dims, dropout, lr, weight_decay, epochs, batch_size, patience.
@@ -192,7 +204,7 @@ class TorchMLPRegressor(BaseEstimator, RegressorMixin):
         for h in self.hidden_dims:
             layers.extend([
                 nn.Linear(in_dim, h),
-                nn.BatchNorm1d(h),
+                nn.LayerNorm(h),
                 nn.ReLU(),
                 nn.Dropout(self.dropout),
             ])
@@ -269,14 +281,21 @@ class MCDropoutRegressor(TorchMLPRegressor):
     After predict(), self.uncertainty_ holds per-sample std.
     """
 
-    def __init__(self, mc_samples=50, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, mc_samples=50, hidden_dims=(128, 64, 32), dropout=0.3,
+                 lr=1e-3, weight_decay=1e-2, epochs=500, batch_size=32,
+                 patience=30, random_state=42):
+        # Explicit parameters preserve architecture and seed through sklearn.clone.
+        super().__init__(hidden_dims=hidden_dims, dropout=dropout, lr=lr,
+                         weight_decay=weight_decay, epochs=epochs,
+                         batch_size=batch_size, patience=patience,
+                         random_state=random_state)
         self.mc_samples = mc_samples
 
     def predict(self, X):
         import torch
-        # Eval mode first (BatchNorm needs eval to avoid crash on single-sample
-        # batches common with LOGO CV), then selectively enable Dropout only.
+        if self.mc_samples < 1:
+            raise ValueError("mc_samples must be positive")
+        # Enable stochastic Dropout while keeping all other layers in eval mode.
         self.net_.eval()
         for m in self.net_.modules():
             if isinstance(m, torch.nn.Dropout):
@@ -291,7 +310,7 @@ class MCDropoutRegressor(TorchMLPRegressor):
         return preds.mean(axis=0)
 
 
-class FTTransformerRegressor(BaseEstimator, RegressorMixin):
+class FTTransformerRegressor(RegressorMixin, BaseEstimator):
     """Feature Tokenizer + Transformer for tabular regression.
 
     Each feature gets a learned Linear(1, d_model) embedding. A learnable CLS token
@@ -444,7 +463,7 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
                               ("trans", self.transformer_),
                               ("head", self.head_)]:
             state[name] = {k: v.clone() for k, v in module.state_dict().items()}
-        state["cls"] = self.cls_token_.clone()
+        state["cls"] = self.cls_token_.detach().clone()
         return state
 
     def _load_state(self, state):
@@ -452,6 +471,28 @@ class FTTransformerRegressor(BaseEstimator, RegressorMixin):
         self.transformer_.load_state_dict(state["trans"])
         self.head_.load_state_dict(state["head"])
         self.cls_token_.data.copy_(state["cls"])
+
+
+class TabNetRegressorAdapter(RegressorMixin, BaseEstimator):
+    """Bridge sklearn's one-dimensional targets to TabNet's two-dimensional API."""
+
+    def __init__(self, estimator, max_epochs=200, batch_size=256, virtual_batch_size=128):
+        self.estimator = estimator
+        self.max_epochs = max_epochs
+        self.batch_size = batch_size
+        self.virtual_batch_size = virtual_batch_size
+
+    def fit(self, X, y):
+        self.estimator.fit(np.asarray(X, dtype=np.float32),
+                           np.asarray(y, dtype=np.float32).reshape(-1, 1),
+                           max_epochs=self.max_epochs, patience=0,
+                           batch_size=self.batch_size,
+                           virtual_batch_size=self.virtual_batch_size,
+                           drop_last=False)
+        return self
+
+    def predict(self, X):
+        return np.asarray(self.estimator.predict(np.asarray(X, dtype=np.float32))).reshape(-1)
 
 
 # ===========================================================================
@@ -470,6 +511,7 @@ def _build_xgboost(params):
         "n_estimators": 1000, "max_depth": 4, "learning_rate": 0.03,
         "subsample": 0.7, "colsample_bytree": 0.7, "min_child_weight": 5,
         "reg_alpha": 0.5, "reg_lambda": 2.0, "random_state": 42,
+        "n_jobs": 1,
     }
     if USE_GPU:
         defaults["device"] = "cuda"
@@ -493,7 +535,6 @@ def _build_catboost(params):
     defaults = {
         "iterations": 1000, "depth": 4, "learning_rate": 0.03,
         "l2_leaf_reg": 3, "random_seed": 42, "verbose": 0,
-        "early_stopping_rounds": 50,
     }
     if USE_GPU:
         defaults["task_type"] = "GPU"
@@ -520,8 +561,8 @@ def _build_lightgbm(params):
         "subsample": 0.7, "colsample_bytree": 0.7, "reg_alpha": 0.5,
         "reg_lambda": 2.0, "random_state": 42, "verbose": -1,
     }
-    if USE_GPU:
-        defaults["device"] = "gpu"
+    # PyTorch CUDA availability does not imply a GPU-enabled LightGBM build.
+    # Select device="gpu" or "cuda" explicitly after checking that backend.
     defaults.update(params)
     return lgb.LGBMRegressor(**defaults), {
         "needs_scaling": False,
@@ -542,7 +583,7 @@ def _build_histgb(params):
     defaults = {
         "max_iter": 500, "max_depth": 4, "learning_rate": 0.05,
         "min_samples_leaf": 10, "l2_regularization": 1.0,
-        "random_state": 42, "early_stopping": True,
+        "random_state": 42, "early_stopping": False,
         "validation_fraction": 0.15, "n_iter_no_change": 20,
     }
     defaults.update(params)
@@ -560,7 +601,7 @@ def _build_histgb(params):
 
 @register("pytorch_mlp", "neural")
 def _build_pytorch_mlp(params):
-    """PyTorch MLP with dropout, batch norm, AdamW, early stopping. CUDA-capable.
+    """PyTorch MLP with dropout, layer norm, AdamW, early stopping. CUDA-capable.
 
     Tunable: hidden_dims, dropout, lr, weight_decay, epochs, batch_size, patience.
     """
@@ -660,15 +701,18 @@ def _build_tabpfn(params):
 def _build_tabnet(params):
     """TabNet: Attention-based feature selection NN.
 
-    Tunable: n_d, n_a, n_steps, gamma, lambda_sparse, lr.
+    Tunable: n_d, n_a, n_steps, gamma, lambda_sparse, optimizer_params,
+    max_epochs, batch_size, virtual_batch_size.
     """
     from pytorch_tabnet.tab_model import TabNetRegressor as _TabNet
     defaults = {
         "n_d": 16, "n_a": 16, "n_steps": 3, "gamma": 1.3,
         "lambda_sparse": 1e-3, "seed": 42, "verbose": 0,
     }
-    defaults.update(params)
-    model = _TabNet(**defaults)
+    fit_options = {key: params[key] for key in ("max_epochs", "batch_size", "virtual_batch_size")
+                   if key in params}
+    defaults.update({key: value for key, value in params.items() if key not in fit_options})
+    model = TabNetRegressorAdapter(_TabNet(**defaults), **fit_options)
     return Pipeline([
         ("scaler", StandardScaler()),
         ("tabnet", model),
@@ -691,7 +735,7 @@ def _build_mlp(params):
         "hidden_layer_sizes": (64, 32), "activation": "relu",
         "solver": "adam", "alpha": 0.001, "learning_rate": "adaptive",
         "learning_rate_init": 0.001, "max_iter": 2000,
-        "early_stopping": True, "validation_fraction": 0.15,
+        "early_stopping": False, "validation_fraction": 0.15,
         "random_state": 42,
     }
     defaults.update(params)
@@ -799,10 +843,10 @@ def _build_bayesian_ridge(params):
     """Bayesian Ridge regression. Automatic regularization + uncertainty.
 
     Returns prediction uncertainty via model.predict(X, return_std=True).
-    Tunable: n_iter, tol.
+    Tunable: max_iter, tol.
     """
     from sklearn.linear_model import BayesianRidge
-    defaults = {"n_iter": 300, "tol": 1e-6, "compute_score": True}
+    defaults = {"max_iter": 300, "tol": 1e-6, "compute_score": True}
     defaults.update(params)
     return Pipeline([
         ("scaler", StandardScaler()),
@@ -903,9 +947,9 @@ def _build_stacking(params):
 
     base_estimators = [
         ("xgb", xgb.XGBRegressor(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)),
+            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42, n_jobs=1)),
         ("histgb", HistGradientBoostingRegressor(
-            max_iter=200, max_depth=4, random_state=42)),
+            max_iter=200, max_depth=4, random_state=42, early_stopping=False)),
         ("ridge", Pipeline([("s", StandardScaler()), ("r", Ridge(alpha=1.0))])),
         ("enet", Pipeline([("s", StandardScaler()),
                            ("e", ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42))])),
@@ -913,15 +957,14 @@ def _build_stacking(params):
                           ("k", KNeighborsRegressor(n_neighbors=7, weights="distance"))])),
     ]
 
-    defaults = {"passthrough": False}
+    defaults = {"passthrough": False, "n_jobs": 1}
     defaults.update(params)
 
     model = StackingRegressor(
         estimators=base_estimators,
         final_estimator=Ridge(alpha=1.0),
         cv=5,  # overridden by cross_validate for group-awareness
-        passthrough=defaults.get("passthrough", False),
-        n_jobs=-1,
+        **defaults,
     )
 
     return model, {
