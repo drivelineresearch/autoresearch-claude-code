@@ -124,6 +124,14 @@ leave other workspace, `.codex`, and network boundaries in place. This is a
 synthetic integration fixture, not an ML performance result. Exact host repair,
 evidence, scope, and rollback are in [codex-sandbox.md](codex-sandbox.md).
 
+Claude Code **2.1.263** also passed an authenticated plugin test after fixing the
+command/skill path adapter. The native Stop hook first requested continuation;
+Claude read the shared protocol, completed one keep/commit/log cycle, and the
+final Stop hook automatically paused at 2/2 runs. Independent checks confirmed
+the commit, metric/checks, unchanged scorer/history, and clean worktree. Native
+hook evidence and test limits are recorded in
+[claude-verification.md](claude-verification.md).
+
 ## 5. Remaining work, in order
 
 1. **Independent score verification.** State validation proves well-formed records,
