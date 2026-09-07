@@ -1,8 +1,11 @@
 # Image-generation prompts
 
-Prompts for the README header banner and the "how it works" explainer diagram.
+Historical Claude-specific prompts for the README header banner and the "how it works" explainer diagram.
+They are design assets, not a current architecture specification. Codex uses the
+bounded supervisor described in `skills/autoresearch/references/codex.md`. Future
+diagrams should distinguish instructed scorer/noise rules from runtime checks.
 Paste into an image model (GPT-Image / Imagen / etc.). Suggested output paths:
-`imgs/header.png` (banner) and `imgs/how-it-works.png` (diagram).
+`imgs/autoresearch-banner.png` (banner) and `imgs/how-it-works.png` (diagram).
 
 ---
 

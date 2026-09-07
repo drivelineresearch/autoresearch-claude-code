@@ -1,178 +1,158 @@
 # autoresearch-claude-code
 
-![autoresearch — autonomous experiment loop for Claude Code](imgs/autoresearch-banner.png)
+![autoresearch](imgs/autoresearch-banner.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://docs.anthropic.com/en/docs/claude-code)
 
-Autonomous experiment loop for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Give it a goal, a benchmark, and files to modify — it loops forever: try ideas, measure results, keep winners, discard losers.
+A measured experiment loop for **Claude Code and Codex**. Define a goal, a fixed
+benchmark, and files to modify. The agent tries changes, measures results, commits
+supported improvements, and records failed ideas within a budget.
 
-Port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) as a pure skill — no MCP server, just instructions the agent follows with its built-in tools.
+Inspired by [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch).
+The experiment protocol is a shared skill with standard-library Python helpers;
+no MCP server is required.
 
 ## Install
 
-### Option A: Let Claude do it (easiest)
+Requires **Python 3.10+, Bash, Git**, and your chosen agent client. Linux and macOS
+are supported; use WSL on Windows. The optional ML example has its own dependencies.
 
 ```bash
-git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
-claude -p "Install the autoresearch plugin from ~/autoresearch-claude-code"
+gh repo clone drivelineresearch/autoresearch-claude-code
+cd autoresearch-claude-code
+./install.sh --codex      # Codex skill in ~/.agents/skills/autoresearch
+./install.sh --claude     # Claude skill, command, and four hooks
+# Or: ./install.sh --all
 ```
 
-Claude will read the repo, run `install.sh`, and configure everything.
+No argument defaults to Claude for compatibility. Installations use symlinks, so
+keep this checkout in place. Existing foreign files/directories are preserved and
+conflicts are reported. Claude settings are validated before changes, updated
+atomically, and backed up when modified. Codex installation does not edit its
+configuration or register Claude hooks.
 
-### Option B: Plugin flag
+Claude also supports a session-local plugin load:
 
 ```bash
-# One-session test drive
-claude --plugin-dir /path/to/autoresearch-claude-code
-
-# Permanent — add to ~/.claude/settings.json:
-# { "plugins": ["~/autoresearch-claude-code"] }
-
-# Toggle on/off
-claude plugin disable autoresearch
-claude plugin enable autoresearch
+claude --plugin-dir /absolute/path/to/autoresearch-claude-code
 ```
 
-### Option C: Manual symlinks
+Choose plugin loading or manual Claude installation; installing both can duplicate
+hooks. For removal, use `./uninstall.sh --codex`, `--claude`, or `--all`. Removal
+only deletes symlinks owned by this checkout and corresponding exact hook entries;
+manually copied files and other installations remain untouched. See
+[installation/review notes](docs/review.md) for migration limits.
+
+## Quick start
+
+In **Codex CLI/IDE**, invoke the installed skill:
+
+```text
+$autoresearch optimize test suite runtime with at most 20 runs
+$autoresearch status
+$autoresearch report
+$autoresearch off
+```
+
+In the Codex app, select the skill or ask to use `autoresearch` by name. Codex
+[discovers symlinked skills in ~/.agents/skills](https://learn.chatgpt.com/docs/build-skills).
+For **Claude Code**, manual installation uses `/autoresearch`; plugin loading uses
+the namespaced `/autoresearch:autoresearch`, with the same goal or subcommands.
+
+The agent establishes scope, creates an experiment branch, prepares a fixed
+benchmark, calibrates noise, and logs a baseline. It preserves existing work;
+use a dedicated worktree when another task is in progress. Artifacts must be
+ignored in the target project too; this plugin's ignores do not transfer.
+
+For unattended Codex execution, first initialize and pause the session with the
+skill, review the baseline, then explicitly resume it and run:
 
 ```bash
-git clone https://github.com/drivelineresearch/autoresearch-claude-code.git ~/autoresearch-claude-code
-cd ~/autoresearch-claude-code && ./install.sh
+# Run from the initialized experiment worktree after reviewing/removing its pause sentinel.
+python3 ~/.agents/skills/autoresearch/scripts/codex_loop.py --dry-run
+python3 ~/.agents/skills/autoresearch/scripts/codex_loop.py \
+  --max-turns 10 --max-seconds 3600 --turn-timeout 300 \
+  --protect path/to/scorer.py
 ```
 
-To remove: `./uninstall.sh`
+Replace `path/to/scorer.py` with your real scorer file; repeat `--protect` for other
+locked inputs. See the [Codex guide](skills/autoresearch/references/codex.md) for
+initialization, flags, logs, pause/cancellation, and recovery.
 
-## Quick Start
+## What is enforced
 
-```
-/autoresearch optimize test suite runtime
-/autoresearch                              # resume existing loop
-/autoresearch status                       # read-only: dashboard + best result so far
-/autoresearch report                       # write a final summary report
-/autoresearch off                          # pause the loop
-```
-
-The agent creates a branch, writes a session doc + benchmark script, measures a noise floor, runs a baseline, then loops autonomously. Send messages mid-loop to steer the next experiment.
-
-## Guardrails (why it doesn't fool itself)
-
-An autonomous "keep whatever wins" loop can quietly lie to you — banking seed noise as progress, gaming its own scorer, or running up unbounded spend. This port borrows the safeguards from Karpathy's [nanochat autoresearch agent](https://github.com/karpathy/nanochat) and the ML-experimentation literature:
-
-- **The loop is mechanically enforced.** A **Stop hook** vetoes the agent ending its turn until a real budget boundary is hit — "never stop" is a mechanism, not a hope. (Uses the JSON-`decision:block` form; exit-code-2 continuation is broken for plugin hooks, [#10412](https://github.com/anthropics/claude-code/issues/10412).)
-- **Noise floor.** The baseline is run several times at setup to measure metric variance; a change is only *kept* if it beats the best by **more than the noise floor**. Borderline wins are re-run on multiple seeds and compared by mean.
-- **Locked eval harness.** `autoresearch.sh` and the metric-emitting code are off-limits to experiments, so the agent can't "improve" the score by editing the scorer.
-- **Budget cap.** `maxRuns` / `maxSeconds` / `targetMetric` in the config header stop the loop cleanly — no unbounded overnight token burn.
-- **Correctness gate.** An optional `checks.sh` runs after the benchmark; a faster-but-wrong change can't be committed (`checks_failed` status).
-- **Survives compaction.** **PreCompact** snapshots state to the worklog; **SessionStart** rehydrates the objective + best result so a resumed agent continues instead of restarting.
-- **Structured search.** Draft several diverse approaches before greedily refining, track experiments as a tree (`parent` pointers) to backtrack out of local optima, and cap debug attempts so it can't rabbit-hole.
-
-## What Can You Optimize?
-
-Anything with a measurable metric:
-
-- **ML models** — R², RMSE, accuracy, F1 (see the [OpenBiomechanics example](#example-fastball-velocity-prediction))
-- **Code performance** — runtime, memory usage, throughput
-- **Build systems** — bundle size, compile time, dependency count
-- **Frontend** — Lighthouse score, load time, CLS
-- **Prompt engineering** — eval scores, parameter-golf
-- **Any script** that outputs `METRIC name=number` to stdout
-
-The only requirement: a bash command that runs your benchmark and prints `METRIC name=number` lines.
-
-## Example: Fastball Velocity Prediction
-
-Included in `examples/` — predicts fastball velocity from biomechanical data using the [Driveline OpenBiomechanics](https://github.com/drivelineresearch/openbiomechanics) dataset and a [model zoo of 19 algorithms](#model-zoo).
-
-![Experiment Progress](imgs/experiment_progress.png)
-
-22 autonomous experiments took R² from **0.44 to 0.78** (+78%), predicting a new player's velocity within ~2 mph from biomechanics alone.
-
-| Metric | Baseline | Best | Change |
-|--------|----------|------|--------|
-| R² | 0.440 | 0.783 | +78% |
-| RMSE | 3.53 mph | 2.20 mph | -38% |
-
-### Setup
-
-```bash
-# Clone data
-mkdir -p third_party
-git clone https://github.com/drivelineresearch/openbiomechanics.git third_party/openbiomechanics
-
-# Install dependencies with uv (https://docs.astral.sh/uv/)
-cd examples
-uv sync                    # core deps (xgboost, sklearn, rich, etc.)
-uv sync --extra all        # all model backends (PyTorch, CatBoost, LightGBM, TabPFN, TabNet)
-
-# Copy example files to working directory and run
-cd ..
-cp examples/train.py examples/models.py examples/autoresearch.sh .
-uv run python train.py
-```
-
-See [`examples/obp-autoresearch.md`](examples/obp-autoresearch.md) for the session config and [`experiments/worklog.md`](experiments/worklog.md) for the full experiment narrative.
-
-## Model Zoo
-
-The example ships with 19 models the agent can swap between. All use a common interface — change `MODEL_TYPE` in `train.py` to switch.
-
-| Category | Models | GPU | Extra Deps |
-|----------|--------|-----|------------|
-| **Boosting** | xgboost, catboost, lightgbm, histgb | xgb/catboost/lgbm | catboost, lightgbm |
-| **Neural** | pytorch_mlp, mc_dropout, ft_transformer, tabpfn, tabnet, mlp | torch-based | torch, tabpfn, pytorch-tabnet |
-| **Linear** | ridge, elasticnet, lasso, huber | — | — |
-| **Bayesian** | bayesian_ridge, gp | — | — |
-| **Other** | svr, knn | — | — |
-| **Ensemble** | stacking | — | — |
-
-Models use lazy imports — missing optional deps produce clear error messages, not crashes. Install what you need:
-
-```bash
-uv sync                    # core (xgboost, sklearn, rich)
-uv sync --extra torch      # + PyTorch/CUDA models
-uv sync --extra boost      # + CatBoost, LightGBM
-uv sync --extra all        # everything
-```
-
-GPU is auto-detected. When CUDA is available, XGBoost/CatBoost/LightGBM/PyTorch models use it automatically.
-
-## How It Works
-
-| pi-autoresearch (MCP) | This port (Plugin) |
+| Capability | Mechanism and limit |
 |---|---|
-| `init_experiment` tool | Agent writes config to `autoresearch.jsonl` (via `jq`) |
-| `run_experiment` tool | Agent runs `./autoresearch.sh` with timing |
-| `log_experiment` tool | Agent appends result via `scripts/ar-log.sh`, `git commit` on keep |
-| TUI dashboard | `autoresearch-dashboard.md` |
-| iteration cap in `config.json` | `maxRuns`/`maxSeconds`/`targetMetric` in the config header |
-| — | **Stop hook** enforces the loop (never stops on its own) |
-| — | **PreCompact** + **SessionStart** hooks survive context compaction |
-| `before_agent_start` hook | `UserPromptSubmit` hook injects context + carries steers |
+| Shared state | Config/result JSONL validated for finite numbers, sequential runs, segments, status, and metadata; writes locked and atomic |
+| Claude continuation | Stop hook blocks turn completion while an active valid session has budget; malformed state allows stopping with a diagnostic |
+| Codex continuation | Bounded `codex exec` supervisor requires one result per invocation; stops on no progress, failure, altered config, branch, or protected files |
+| Budgets | Current-segment run/time/target checks; Codex also caps invocations and actively times out process groups |
+| Pause | `.autoresearch-off`; Codex checks during active turns as well as between them |
+| Recovery | JSONL, worklog, dashboard; Claude PreCompact snapshots and SessionStart context |
+| Noise/correctness | Agent follows measured-noise and checks protocol; helpers do not independently attest a score or statistical significance |
+| Locked scorer | Off-limits scope instructions, plus Codex hashes for specified files between turns; this is not a hostile-agent sandbox |
 
-State lives in `autoresearch.jsonl`. Session artifacts (`*.jsonl`, dashboard, session doc, benchmark script, ideas backlog, worklog) are gitignored.
+Run caps count logged experiments (including baseline and failures), not tokens or
+dollars. Setup/calibration and seed confirmations have additional cost. Claude's
+Stop hook checks at turn boundaries; a benchmark needs its own timeout. A budget
+extension or scorer change must be deliberate; removing a pause sentinel alone
+never resets the budget.
 
-## Project Structure
+Keep/discard uses **strict improvement beyond the noise floor** and passing
+correctness checks. Fix dataset splits, training-only preprocessing, and scoring
+before optimizing; changing the evaluation definition starts a new segment.
 
+The exact workflow is in [SKILL.md](skills/autoresearch/SKILL.md), with
+[state commands/schema](skills/autoresearch/references/state.md). The
+[full review and roadmap](docs/review.md) records findings, changes, validation,
+and remaining limitations.
+
+## Example: fastball velocity prediction
+
+The [OpenBiomechanics example](examples/obp-autoresearch.md) demonstrates the model
+interface, athlete-grouped evaluation, and `METRIC name=number` output.
+
+```bash
+cd examples
+uv sync
+mkdir -p third_party
+gh repo clone drivelineresearch/openbiomechanics third_party/openbiomechanics -- --depth 1
+./autoresearch.sh 42
 ```
-.claude-plugin/plugin.json          # Plugin manifest
-skills/autoresearch/SKILL.md        # Core skill: setup, JSONL protocol, run/log/loop logic
-skills/autoresearch/scripts/ar-log.sh  # Appends valid-JSON result lines (jq, Python fallback)
-commands/autoresearch.md            # /autoresearch (start, resume, status, report, off)
-hooks/hooks.json                    # Hook definitions (plugin format)
-hooks/autoresearch-stop.sh          # Stop hook — the loop engine + budget valve
-hooks/autoresearch-precompact.sh    # PreCompact hook — snapshots state before compaction
-hooks/autoresearch-sessionstart.sh  # SessionStart hook — rehydrates an active loop on resume
-hooks/autoresearch-context.sh       # UserPromptSubmit hook — context + user steers
-install.sh / uninstall.sh           # Manual symlink install (alternative to plugin)
-examples/                           # Demo: fastball velocity prediction
-  train.py                          # Training script with rich TUI output (AR_SEED-aware)
-  models.py                         # Model registry (19 models, GPU detection)
-  pyproject.toml                    # uv project config with dependency groups
-  obp-autoresearch.md               # Session config for the OBP demo
-  autoresearch.sh                   # Benchmark runner (takes optional SEED arg)
+
+Run in `examples/`; do not copy training files out of their uv project. Data paths
+are relative to the script. Optional backends: `uv sync --extra torch`,
+`--extra boost`, `--extra tabpfn`, `--extra tabnet`, or `--extra all`. Some optional
+backends need compatible GPU builds, credentials/model downloads, or extra setup.
+
+The 19 registered models cover boosting, neural/tabular models, linear/Bayesian
+regression, SVR/KNN, and stacking. They load optional dependencies only when selected;
+GPU support depends on the backend and installed build. Start with a CPU backend
+to verify your data and evaluation contract.
+
+**Historical result caveat:** the archived worklog reports R² 0.440 → 0.783, but it
+used feature selection informed by held-out data and changed aggregation/CV during
+the search. Those scores are not a validated like-for-like improvement or an
+independent new-player accuracy estimate. The [original narrative](experiments/worklog.md)
+is preserved with that qualification. Current code uses training-fold feature
+selection and keeps held-out labels out of fitting; rerun a fixed protocol to
+establish a new baseline. No replacement accuracy claim is supplied by this review.
+
+## Development
+
+```bash
+python3 -m unittest discover -s tests -v
+shellcheck install.sh uninstall.sh hooks/*.sh skills/autoresearch/scripts/*.sh examples/autoresearch.sh
 ```
 
-## License
+Core tests need only the standard library; example tests skip if their scientific
+packages are absent. To exercise them: `uv sync --project examples`, then
+`uv run --project examples python -m unittest discover -s tests -p test_examples.py -v`.
+CI runs core tests on Linux/macOS and the example suite with core dependencies.
+Fake-CLI tests validate supervisor behavior; authenticated Codex runs and optional
+GPU/model backends require separate integration checks.
+The real Codex keep/commit/log cycle is now verified after repairing this host's
+Ubuntu AppArmor profile and granting scoped Git metadata writes. Sandbox boundary
+checks also passed. See the [sandbox repair and verification report](docs/codex-sandbox.md).
 
-[MIT](LICENSE)
+Contributor guidance: [AGENTS.md](AGENTS.md). License: [MIT](LICENSE).

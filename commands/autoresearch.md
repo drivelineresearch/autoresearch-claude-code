@@ -1,5 +1,5 @@
 ---
-description: Start, resume, or inspect autonomous experiment loop
+description: Start, resume, inspect, report, or pause a measured experiment loop
 argument-hint: [off | status | report | goal description]
 allowed-tools:
   - Read
@@ -8,55 +8,40 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Skill
 ---
 
-# Autoresearch Command
-
-You are starting, resuming, or inspecting an autonomous experiment loop.
-
-## Handle arguments
+# Autoresearch command
 
 Arguments: $ARGUMENTS
 
-### If arguments = "off"
+Read `${CLAUDE_PLUGIN_ROOT}/skills/autoresearch/SKILL.md` and follow its protocol.
+Claude substitutes that plugin path in this command's text; it need not exist as
+an environment variable in Bash. For a manual install, where the placeholder is
+not expanded, read `~/.claude/skills/autoresearch/SKILL.md` instead. Resolve
+`AR_SCRIPTS` to the `scripts` directory beside the file you read. Do not invoke
+`autoresearch` through the Skill tool again: this adapter shares that name and
+can shadow the shared skill. If neither known path exists, pause and report the
+missing installation rather than searching outside those locations.
 
-Create a `.autoresearch-off` sentinel file in the current directory:
-```bash
-touch .autoresearch-off
-```
-Then tell the user autoresearch mode is paused. It can be resumed by running `/autoresearch` again (which will delete the sentinel). The Stop hook honors this sentinel and will let the loop end.
+Handle the requested mode before any resume or setup action:
 
-### If arguments = "status"
+- **off:** create `.autoresearch-off` in the experiment workspace, preserve partial
+  work, and stop. Do not launch another experiment.
+- **status:** read state/dashboard/recent worklog and show current segment budget,
+  baseline/best, counts, and pause status. Do not resume or change experiment data.
+  For a live Claude session, first create `.autoresearch-inspect` so the Stop hook
+  permits this inspection turn to end. This small control write is the only write.
+- **report:** for a live Claude session create `.autoresearch-inspect`; write
+  `autoresearch-report.md` with results, evidence limits, winning changes, failures,
+  and remaining ideas. Do not run experiments or unpause. This mode writes a report.
+- **resume (session exists):** read session/state/worklog and git status/log. Resolve
+  partial/unlogged work first and check the budget. Remove `.autoresearch-off` only
+  when explicitly resuming within budget; do not reset the config to gain runs.
+  An exhausted budget needs a user extension or deliberate new experiment contract.
+- **fresh goal (no session):** verify git and preserve existing work, then follow
+  skill setup. Infer goal/metric/scope from supplied arguments where possible.
 
-Read-only. **First, if a live session exists (`autoresearch.md` present and no `.autoresearch-off`), run `touch .autoresearch-inspect`** — this one-shot sentinel lets the Stop hook end this inspection turn cleanly instead of bouncing you into the next experiment. Then do NOT run experiments or change state. Print a concise status:
-1. `cat autoresearch-dashboard.md` if it exists (the pre-rendered table).
-2. Otherwise reconstruct from `autoresearch.jsonl`: total runs vs `maxRuns`, kept/discarded/crashed/checks_failed counts, baseline, current best (metric + which run + Δ%), noise floor, and whether `.autoresearch-off` is set (paused) or the loop is live.
-3. Show the last 3 worklog entries from `experiments/worklog.md`.
-Then stop — this is a report, not a resume.
-
-### If arguments = "report"
-
-Read-only final report. **First, if a live session exists (`autoresearch.md` present and no `.autoresearch-off`), run `touch .autoresearch-inspect`** so the Stop hook lets this turn end cleanly. Write `autoresearch-report.md` summarizing the session: objective, baseline → best (with %), the winning configuration/diff summary, what classes of change worked vs. failed (from the worklog meta-reviews), and any open ideas from `autoresearch.ideas.md`. Then print its path. Do NOT resume the loop.
-
-### If `autoresearch.md` exists in the current directory (resume)
-
-This is a resume. Do the following:
-
-1. Delete `.autoresearch-off` if it exists
-2. Read `autoresearch.md` to understand the objective, constraints, and what's been tried
-3. Read `autoresearch.jsonl` to reconstruct state:
-   - Count total runs, kept, discarded, crashed
-   - Find baseline metric (first result in current segment)
-   - Find best metric and which run achieved it
-   - Identify which secondary metrics are being tracked
-4. Read recent git log: `git log --oneline -20`
-5. If `autoresearch.ideas.md` exists, read it for experiment inspiration
-6. Continue the loop from where it left off — pick up the next experiment
-
-### If `autoresearch.md` does NOT exist (fresh start)
-
-1. **Verify you're in a git repo** (`git rev-parse --git-dir`). If not, stop and tell the user to `git init` first — the loop needs git to keep/revert experiments.
-2. Delete `.autoresearch-off` if it exists
-3. Invoke the `autoresearch` skill to set up the experiment from scratch
-4. If arguments were provided (other than a subcommand), use them as the goal description to skip/answer the setup questions
+A user stop, cancellation, or new scope overrides continuation. Complete one
+experiment per autonomous turn; the Claude Stop hook handles the next turn when
+valid state and budget permit it. Never treat a plugin code review as a request to
+start an optimization session.

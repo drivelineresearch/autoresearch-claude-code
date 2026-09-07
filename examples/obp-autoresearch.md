@@ -1,118 +1,159 @@
-# Autoresearch: Fastball Velocity Prediction
+# Autoresearch: fastball velocity prediction
 
-## Objective
-Predict fastball velocity (`pitch_speed_mph`) from biomechanical Point-of-Interest (POI) metrics using the [Driveline OpenBiomechanics](https://github.com/drivelineresearch/openbiomechanics) dataset. The dataset has 411 fastball pitches from 100 players, each with 78 biomechanical features covering joint angles, velocities, moments, ground reaction forces, and energy flow metrics at key phases (foot plant, max external rotation, ball release).
+## Objective and evidence boundary
 
-We optimize cross-validated R² using LeaveOneGroupOut (grouped by player/session) to prevent data leakage -- the model must generalize to unseen players.
+Predict `pitch_speed_mph` from biomechanical Point-of-Interest (POI) metrics in the
+[Driveline OpenBiomechanics dataset](https://github.com/drivelineresearch/openbiomechanics).
+The published pitching release contains 411 fastball trials from 100 athletes.
+These are contemporaneous movement measurements: this example measures predictive
+association, not whether changing a mechanical feature causes a velocity gain.
 
-## Prerequisites
+Optimize pooled out-of-fold R² under a **fixed athlete-disjoint evaluation**.
+The athlete key is `user` from `baseball_pitching/data/metadata.csv`, joined to POI
+rows using the unique `session_pitch` identifier. `session` alone is not a durable
+athlete identifier. See the upstream [datasheet](https://github.com/drivelineresearch/openbiomechanics/blob/main/DATASHEET.md).
 
-Clone the OpenBiomechanics dataset into `third_party/`:
+## Setup and execution
+
+Run the example in place; keep `pyproject.toml`, the runner, `train.py`,
+`models.py`, and `candidate.py` in the same directory. From the repository root:
 
 ```bash
+cd examples
 mkdir -p third_party
-git clone https://github.com/drivelineresearch/openbiomechanics.git third_party/openbiomechanics
+gh repo clone drivelineresearch/openbiomechanics third_party/openbiomechanics -- --depth 1
+uv sync
+# Record the actual dataset revision and environment for the experiment log.
+git -C third_party/openbiomechanics rev-parse HEAD
+uv pip freeze
+./autoresearch.sh 42
 ```
 
-Install dependencies with [uv](https://docs.astral.sh/uv/):
+The clone is a one-time step; do not run it over an existing checkout. The example
+uses only the small in-repository CSVs and needs no raw capture/media downloads.
+Install [uv](https://docs.astral.sh/uv/) first if necessary. Optional backends:
 
 ```bash
-uv sync                    # core deps (xgboost, sklearn, rich, etc.)
-uv sync --extra torch      # + PyTorch/CUDA models
-uv sync --extra boost      # + CatBoost, LightGBM
-uv sync --extra all        # everything (torch, catboost, lightgbm, tabpfn, tabnet)
+uv sync --extra torch       # PyTorch wrappers
+uv sync --extra boost       # CatBoost and LightGBM
+uv sync --extra tabpfn      # pretrained TabPFN backend
+uv sync --extra tabnet      # TabNet
+uv sync --extra all         # every optional backend; can be a large installation
 ```
 
-## Metrics
-- **Primary**: r2 (unitless, higher is better) -- cross-validated R² score
-- **Secondary**: rmse (mph) -- cross-validated root mean squared error
+`uv sync` selects the requested extras for that environment; include the extras
+you intend to keep each time you sync. Optional framework installation does not
+prove GPU compatibility or availability of model weights. In particular, TabPFN
+may require a separate model download, network access, and applicable model access
+terms when first fitted. Those backends have not all been runtime-tested here.
 
-## How to Run
-`./autoresearch.sh` -- outputs `METRIC name=number` lines.
+From the repository root, `./examples/autoresearch.sh 42` also works. The runner
+changes to its own directory and uses one interpreter for checks and training.
+For direct execution use `uv run --project examples python examples/train.py`.
+By default data and plots are located relative to `examples/train.py`, independent
+of the caller's working directory. For an existing dataset checkout, set absolute
+`AR_DATA_PATH` and `AR_METADATA_PATH`; `AR_PLOT_DIR` overrides the output directory.
 
-Or directly: `uv run python train.py`
+For the repository's research loop, create a root `autoresearch.sh` that executes
+`./examples/autoresearch.sh "$@"`, or run the research loop from `examples/` with
+this document copied to `autoresearch.md`. Keep the same working directory for
+all runs in a session and ensure the session's declared runner path matches it.
 
-## Files in Scope
-- `train.py` -- main training script; config constants, data loading, CV evaluation, visualization
-  - `MODEL_TYPE` config: swap between any registered model (see models.py for full list)
-  - `MODEL_PARAMS` dict: override default hyperparameters for the selected model
-- `models.py` -- model registry; browse this to discover available models and tunable parameters
-  - Categories: boosting, linear, neural, ensemble, bayesian, other
-  - Each model has metadata: GPU support, scaling needs, importance type
-- `pyproject.toml` -- uv project config with dependency groups
+## Fixed evaluation contract
 
-## Off Limits
-- `third_party/` -- raw data, do not modify
-- `skills/`, `commands/`, `hooks/` -- autoresearch infrastructure
-- `.venv/` -- managed by uv
+- Primary output: `METRIC r2=number`, pooled across all out-of-fold predictions;
+  higher is better. Secondary: `METRIC rmse=number`, in mph; lower is better.
+- Leave-one-athlete-out CV is the default. Multiple sessions from the same athlete
+  remain in the same fold. Never compute a mean of singleton-fold R² values.
+- `AGGREGATE_TO_PLAYER=True` predicts each athlete's mean velocity from their mean
+  mechanics. This is a different prediction task from individual-pitch velocity.
+  Freeze that choice for a research session; do not compare both scores as if the
+  task were unchanged.
+- Supervised feature selection is fitted separately on each outer training fold.
+  Standardization is fitted inside each model pipeline on that training fold.
+- Outer held-out targets are never passed to fitting or early stopping. Default
+  models use fixed iteration/epoch budgets. Adding early stopping requires a
+  separate inner athlete split and preprocessing fitted on its training subset.
+- Stacking uses athlete-aware inner CV. It needs at least three athlete groups;
+  small training sets may also require reducing KNN's `n_neighbors`.
+- Missing athlete mappings, ambiguous pitch IDs, non-fastballs, unknown handedness,
+  missing/nonfinite features, and invalid targets fail with explicit errors.
+  If a different dataset needs imputation, fit it within training folds.
+- `AR_SEED` (or the runner's positional seed) reaches selection and every exposed
+  estimator seed, including pipeline/stacking children. Repeat seeds measure
+  stochastic training variation, not dataset uncertainty or protection against
+  adaptive overfitting. GPU operations can still have backend-specific variance.
+- Keep data revision, grouping, aggregation, outer splits, metrics, and target fixed
+  while comparing candidates. Repeatedly optimizing this CV score makes it a
+  **development score**. A final untouched cohort or nested evaluation of the whole
+  search procedure is needed before claiming generalization performance.
 
-## Constraints
-- Must use LeaveOneGroupOut on `session` column (player-level splits) -- no data leakage
-- Must produce reproducible results (fixed random seeds)
-- Script must output `METRIC r2=X.XXXX` and `METRIC rmse=X.XXXX` lines to stdout
-- Must generate visualization plots to `plots/` directory on each run
-- Core dependencies (always available): xgboost, scikit-learn, pandas, numpy, matplotlib, rich
-- Optional dependencies (install for specific models): torch, catboost, lightgbm, tabpfn, pytorch-tabnet
-- GPU acceleration available when CUDA is present (auto-detected by models.py)
+## Files and allowed changes
 
-## Data Summary
-- 411 rows (all fastballs), 100 unique players (~4 pitches each)
-- Target: `pitch_speed_mph` (range 69.5-94.4 mph, mean 84.7)
-- Features: 78 biomechanical columns (columns 6-81 in the CSV)
-- Categorical: `p_throws` (R/L) -- needs encoding
-- ID columns (drop): `session_pitch`, `session`, `pitch_type`
+For an experiment session, restrict candidate edits to model/feature proposals:
 
-## Current Best
-- **R²=0.783, RMSE=2.20 mph** after 22 experiments
-- Architecture: Player-level aggregation + LeaveOneGroupOut CV + two-pass feature selection (top 15) + XGBoost with early stopping
-- See `experiments/worklog.md` for full experiment history
+- `candidate.py`: `MODEL_TYPE`, `MODEL_PARAMS`, `TOP_N_FEATURES`, and row-local feature
+  formulas. `TOP_N_FEATURES=None` disables supervised selection. Selection otherwise
+  uses a fixed-budget XGBoost ranker trained only on the outer training subset.
+- `models.py`: registered estimators and their hyperparameters.
 
-## What's Been Tried
-See `experiments/worklog.md` for a detailed narrative of all 22 experiments, including what worked, what failed, and why. Key findings:
+Keep `train.py` (evaluation, target/identifier exclusion, and metadata joins),
+raw `third_party/` data, runner, and dependency environment fixed
+within that session. Protect `train.py` and the runner with the research tool's
+`--protect` options; candidate edits belong in `candidate.py` and `models.py`. A
+deliberate evaluation change starts a new baseline/session.
+Do not change `skills/`, `commands/`, `hooks/`, or `.venv/` as an experiment candidate.
+If dependencies must change, declare and resolve that change before comparing runs.
 
-1. Feature selection (top 15 from importance-based two-pass) was the single biggest win
-2. Player-level aggregation (mean metrics per player) removes within-player noise
-3. LeaveOneGroupOut CV (100-fold) dramatically outperforms 5-fold GroupKFold
-4. Energy transfer features dominate: elbow, thorax distal, and shoulder transfer (foot plant to ball release)
-5. Hyperparameter tuning, ensemble approaches, and alternative boosters gave diminishing or negative returns
+## Model registry and practical choices
 
-### Model zoo (19 models available)
+There are 19 registered models. Dependency discovery is available without fitting
+models or fetching weights:
 
-#### Boosting (best for tabular data)
-- `MODEL_TYPE="xgboost"` -- Current champion. Tune max_depth, learning_rate, reg_alpha, reg_lambda.
-- `MODEL_TYPE="catboost"` -- CatBoost. Try depth, l2_leaf_reg. Supports GPU.
-- `MODEL_TYPE="lightgbm"` -- LightGBM. Fastest. Try num_leaves, min_child_samples.
-- `MODEL_TYPE="histgb"` -- sklearn HistGradientBoosting. No extra deps. Try max_depth, l2_regularization.
+```bash
+uv run python -c 'from models import print_model_table; print_model_table()'
+```
 
-#### Neural networks
-- `MODEL_TYPE="pytorch_mlp"` -- PyTorch MLP with dropout, batch norm, AdamW, early stopping. Tune hidden_dims, dropout, lr, weight_decay. CUDA-accelerated.
-- `MODEL_TYPE="ft_transformer"` -- Feature Tokenizer + Transformer. Attention-based. Tune d_model, n_heads, n_layers.
-- `MODEL_TYPE="tabpfn"` -- Pretrained transformer foundation model (Nature 2025). Zero-shot, no training. Try n_estimators.
-- `MODEL_TYPE="tabnet"` -- Attention-based feature selection NN. Tune n_d, n_a, n_steps.
-- `MODEL_TYPE="mc_dropout"` -- MC Dropout uncertainty quantification. Same arch as pytorch_mlp + reports prediction uncertainty.
-- `MODEL_TYPE="mlp"` -- sklearn MLPRegressor (simpler, no CUDA).
+| Category | Model names | Useful parameters / limits |
+| --- | --- | --- |
+| Boosting | `xgboost`, `catboost`, `lightgbm`, `histgb` | Depth, iteration count, learning rate, regularization. |
+| Neural | `pytorch_mlp`, `mc_dropout`, `ft_transformer`, `mlp` | Architecture, dropout, learning rate, epoch budget. PyTorch MLPs use layer normalization, which supports singleton batches. |
+| Other neural | `tabpfn`, `tabnet` | TabPFN needs pretrained weights. TabNet supports `max_epochs`, `batch_size`, `virtual_batch_size`, and `optimizer_params`. |
+| Linear | `ridge`, `elasticnet`, `lasso`, `huber` | Regularization; inexpensive baselines. |
+| Bayesian | `bayesian_ridge`, `gp` | BayesianRidge uses `max_iter`. GP scales cubically in sample count. |
+| Other | `svr`, `knn` | Kernel/regularization or neighbors; KNN needs enough training rows. |
+| Ensemble | `stacking` | `passthrough`, `n_jobs`; group-aware inner folds. |
 
-#### Linear / regularized
-- `MODEL_TYPE="ridge"` -- L2 regularization. If close to XGBoost, relationship is mostly linear.
-- `MODEL_TYPE="elasticnet"` -- L1+L2. L1 zeros out features -- compare vs XGBoost importance.
-- `MODEL_TYPE="lasso"` -- L1 only (sparse).
-- `MODEL_TYPE="huber"` -- Robust to outliers.
+Begin with a linear baseline and a modest boosting budget, then use the same
+locked evaluation for more expensive models. CPU execution is sufficient for this
+small dataset. `AR_DEVICE=cpu` disables CUDA auto-detection for supporting builders.
+LightGBM stays on CPU unless its device is explicitly configured after verifying
+that installation's GPU support. Override other backend device settings in
+`MODEL_PARAMS` when needed; PyTorch's CUDA availability does not validate them.
 
-#### Bayesian / probabilistic
-- `MODEL_TYPE="bayesian_ridge"` -- Automatic regularization + uncertainty estimates.
-- `MODEL_TYPE="gp"` -- Gaussian Process. Full Bayesian uncertainty. Ideal for N=100.
+Four plots are written to `plots/` per run. Native model importance and held-out
+permutation MSE increases have different scales. With singleton validation folds,
+permutation importance cannot be estimated; the plot explains its unavailability.
+MC Dropout, GP, and BayesianRidge can produce an additional uncertainty-versus-error
+plot. This diagnostic is descriptive and does not establish calibrated intervals.
 
-#### Other
-- `MODEL_TYPE="svr"` -- Support vector regression (RBF kernel). Tune C, epsilon.
-- `MODEL_TYPE="knn"` -- k-nearest neighbors. Tune n_neighbors, weights.
+## Historical results are not the corrected baseline
 
-#### Ensemble
-- `MODEL_TYPE="stacking"` -- Stacking with diverse base models + Ridge meta-learner. Group-aware inner CV.
+The historical **R²=0.783 / RMSE=2.20 mph** in
+[`experiments/worklog.md`](../experiments/worklog.md) used global supervised feature
+selection and the outer held-out target for early stopping. It also compared
+changes to aggregation and fold strategy. Those scores are not an unbiased estimate
+of performance, and differences do not isolate model improvements. The current
+example corrects those evaluation leaks; a new baseline must be measured before
+making performance claims. The old record remains a historical experiment log.
 
-### Suggested research strategy
-1. **Boosting variants** (catboost, lightgbm, histgb) -- likely competitive with xgboost baseline
-2. **TabPFN** -- zero-shot foundation model, could surprise on small data
-3. **Stacking ensemble** -- combines diverse model strengths
-4. **Neural networks** (pytorch_mlp, ft_transformer) with hyperparameter search
-5. **GP and bayesian_ridge** for uncertainty quantification insights
-6. **Linear models** as baselines to measure nonlinearity contribution
+Fast, synthetic regression checks for the evaluator, data joins, wrappers, seed
+propagation, plotting, and runner can be run from the repository root:
+
+```bash
+uv run --project examples python -m unittest discover -s tests -p test_examples.py -v
+```
+
+These checks do not download the dataset, train optional GPU models, or certify
+all 19 model backends. Preserve the dataset revision, dependency snapshot, candidate
+commit, metric output, and run duration with each real experiment.

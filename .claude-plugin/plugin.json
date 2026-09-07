@@ -1,12 +1,18 @@
 {
   "name": "autoresearch",
   "version": "1.1.0",
-  "description": "Autonomous experiment loop — iteratively optimize any metric with git-tracked experiments, a Stop-hook loop engine, noise-floor keep/discard, and a locked eval harness",
+  "description": "Autonomous experiment workflow with a shared Claude Code/Codex skill, validated state, bounded continuation, and measured keep/discard rules",
   "author": {
     "name": "Driveline Research",
     "url": "https://github.com/drivelineresearch"
   },
   "repository": "https://github.com/drivelineresearch/autoresearch-claude-code",
   "license": "MIT",
-  "keywords": ["experiments", "optimization", "autonomous", "research"]
+  "keywords": [
+    "experiments",
+    "optimization",
+    "autonomous",
+    "research",
+    "codex"
+  ]
 }

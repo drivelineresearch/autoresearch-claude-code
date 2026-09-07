@@ -4,11 +4,14 @@ experiments/*
 !experiments/worklog.md
 autoresearch.jsonl
 autoresearch-dashboard.md
+autoresearch-report.md
 autoresearch.md
 autoresearch.sh
 autoresearch.ideas.md
 .autoresearch-off
 .autoresearch-inspect
+.autoresearch.jsonl.lock
+.autoresearch-codex.lock
 plots/
 
 # Python
