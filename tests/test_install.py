@@ -80,7 +80,7 @@ class InstallerTests(unittest.TestCase):
         self.cli("install", "--codex")
         destination = self.home / ".agents/skills/autoresearch"
         self.assertTrue(destination.is_symlink())
-        self.assertEqual(destination.resolve(), self.repo / "skills/autoresearch")
+        self.assertEqual(destination.resolve(), (self.repo / "skills/autoresearch").resolve())
         self.assertFalse((self.home / ".claude").exists())
         snapshot = self.snapshot()
         self.cli("install", "--codex")

@@ -8,15 +8,22 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Skill
 ---
 
 # Autoresearch command
 
 Arguments: $ARGUMENTS
 
-Load the autoresearch skill and follow its protocol. Handle the requested mode
-before any resume or setup action:
+Read `${CLAUDE_PLUGIN_ROOT}/skills/autoresearch/SKILL.md` and follow its protocol.
+Claude substitutes that plugin path in this command's text; it need not exist as
+an environment variable in Bash. For a manual install, where the placeholder is
+not expanded, read `~/.claude/skills/autoresearch/SKILL.md` instead. Resolve
+`AR_SCRIPTS` to the `scripts` directory beside the file you read. Do not invoke
+`autoresearch` through the Skill tool again: this adapter shares that name and
+can shadow the shared skill. If neither known path exists, pause and report the
+missing installation rather than searching outside those locations.
+
+Handle the requested mode before any resume or setup action:
 
 - **off:** create `.autoresearch-off` in the experiment workspace, preserve partial
   work, and stop. Do not launch another experiment.

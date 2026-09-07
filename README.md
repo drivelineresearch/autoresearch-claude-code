@@ -56,7 +56,8 @@ $autoresearch off
 
 In the Codex app, select the skill or ask to use `autoresearch` by name. Codex
 [discovers symlinked skills in ~/.agents/skills](https://learn.chatgpt.com/docs/build-skills).
-For **Claude Code**, use `/autoresearch` with the same goal or subcommands.
+For **Claude Code**, manual installation uses `/autoresearch`; plugin loading uses
+the namespaced `/autoresearch:autoresearch`, with the same goal or subcommands.
 
 The agent establishes scope, creates an experiment branch, prepares a fixed
 benchmark, calibrates noise, and logs a baseline. It preserves existing work;

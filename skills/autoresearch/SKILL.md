@@ -14,8 +14,9 @@ User interruptions and scope changes take precedence over continuation instructi
 Resolve `AR_SCRIPTS` to the `scripts` directory alongside this skill's actual file.
 The helpers require Python 3.10+; Bash wrappers and locking support Linux/macOS.
 
-- **Claude Code:** `/autoresearch` routes through the command. The four registered
-  Claude hooks handle continuation and compaction. Complete one experiment per turn.
+- **Claude Code:** invoke `/autoresearch` for manual installation, or
+  `/autoresearch:autoresearch` when loaded as a plugin. The four registered Claude
+  hooks handle continuation and compaction. Complete one experiment per turn.
 - **Codex:** invoke `$autoresearch` in CLI/IDE, or select this skill in the app.
   Use the same protocol with Codex's available read/edit/exec tools. This package's
   Claude hook registration does not install Codex hooks. For unattended continuation,
@@ -29,9 +30,11 @@ The helpers require Python 3.10+; Bash wrappers and locking support Linux/macOS.
 - **Off/pause:** create `.autoresearch-off` and stop. During a running benchmark,
   cancel safely if possible; preserve partial work and report any unfinished process.
 
-For Claude status/report turns only, the command uses `.autoresearch-inspect` to
-allow one stop. This is a control-file write; it does not log or run an experiment.
-Codex status needs no inspection sentinel.
+For Claude status/report turns in an active experiment, first create
+`.autoresearch-inspect` in the experiment workspace, including when this skill
+was loaded directly. The Stop hook consumes it to let the inspection turn end.
+For status, this control-file write is the only write; it does not log or run an
+experiment. Codex status remains read-only and creates no inspection sentinel.
 
 ## Setup
 

@@ -78,6 +78,7 @@ def preflight(root):
 
 def git_metadata_roots(root):
     """Grant Git's metadata directories, including a linked worktree's common dir."""
+    root = Path(root).resolve()
     directories = []
     for options in (("--absolute-git-dir",), ("--path-format=absolute", "--git-common-dir")):
         path = Path(git(root, "rev-parse", *options))
@@ -131,7 +132,7 @@ def terminate(process):
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        pass  # Still reap the direct child below, even if its group disappeared.
     # The CLI can exit before descendants, including children ignoring SIGTERM.
     # Keep ownership of the process group until it disappears or grace expires.
     deadline = time.monotonic() + 3
@@ -141,6 +142,11 @@ def terminate(process):
             os.killpg(process.pid, 0)
         except ProcessLookupError:
             break
+        except PermissionError:
+            # Darwin can report EPERM for a group containing only zombies if a
+            # child exits between poll() and this probe. Retry after reaping;
+            # a real permission failure still reaches SIGKILL at the deadline.
+            pass
         time.sleep(0.05)
     else:
         try:

@@ -308,11 +308,15 @@ def run_hook(event):
     """Hooks fail open for stopping, and never substitute the process cwd."""
     try:
         cwd = _hook_directory()
-        if not (cwd / "autoresearch.md").is_file() or os.path.lexists(cwd / ".autoresearch-off"):
+        if not (cwd / "autoresearch.md").is_file():
             return
         inspect = cwd / ".autoresearch-inspect"
         if event == "stop" and os.path.lexists(inspect):
+            # An inspection can finish while paused. Consume its one-stop marker
+            # now so a later explicit resume does not inherit an extra stop.
             inspect.unlink()
+            return
+        if os.path.lexists(cwd / ".autoresearch-off"):
             return
         path = cwd / "autoresearch.jsonl"
         if not path.exists():

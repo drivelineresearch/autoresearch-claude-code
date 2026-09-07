@@ -132,7 +132,7 @@ checkout's source files and the linked worktree's `.codex` remained protected,
 and network access remained blocked. Common Git metadata is writable by
 necessity; source-file isolation is not per-branch metadata isolation.
 
-Final automated suite: **94 unique tests passed, no skips, in 27.872 seconds**,
+Final automated suite: **99 unique tests passed, no skips, in 28.944 seconds**,
 including standalone and linked-worktree metadata grants and rejection of broad
 or missing directory grants. Host repair is a system prerequisite; it is not
 silently installed by this repository's user-level skill installer.

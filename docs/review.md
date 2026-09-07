@@ -27,6 +27,8 @@ git/filesystem operations and unreliable evaluation, not missing model APIs.
 | Medium | Model wrappers had cloning/API/shape issues; GPU detection did not establish every backend's capability. | Seed propagation, wrapper fixes, explicit device choices, current core CPU API checks, and honest optional-backend limits. |
 | Medium | Shared temporary log, stdout/stderr mixing, unbounded output reads, and GNU-only timing snippets made experiment instructions unreliable. | Unique bounded log guidance, stdout-only metrics, explicit exit/finite checks, portable timing guidance. |
 | Medium | README copied files outside their uv project and overstated locked-harness, budget, and accuracy guarantees. | Run-in-place setup, declared dependencies/platforms, mechanism-versus-instruction table, corrected result provenance. |
+| Medium | Claude command and skill share an invocation name; loading the command could hide the shared protocol and helper paths. | Explicitly read the shared skill using the substituted plugin root, with the manual-install path used only for an unresolved placeholder. |
+| Medium | An inspection marker left during a concurrent pause could suppress the next resumed continuation. | Consume the one-turn marker before handling the paused state. |
 | Medium | No automated regression suite or CI. | Temporary-workspace tests for state, hooks, installer, runner, and evaluation; Linux/macOS CI and scientific-dependency job. |
 
 The review covered every tracked text/code surface: shared skill, command,
@@ -84,8 +86,8 @@ checks do not guarantee optional GPU/model package behavior.
 
 ## 4. Validation
 
-Final combined validation: **94 unique tests passed, no skips, in 27.872 seconds**:
-33 state/hook tests, 22 installer tests, 17 Codex-supervisor tests, and 22 example
+Final combined validation: **99 unique tests passed, no skips, in 28.944 seconds**:
+34 state/hook tests, 22 installer tests, 21 Codex-supervisor tests, and 22 example
 tests. The scientific test environment used CPU XGBoost 3.4.1 and scikit-learn
 1.8.0, with no GPU/model-weight or dataset download. A synthetic full example
 entrypoint also emitted two finite metrics and generated four expected plots.
@@ -100,8 +102,11 @@ injected failures, held-out label isolation, and child cancellation. Reproduce
 core checks with `python3 -m unittest discover -s tests -v`; use the documented
 example uv environment to exercise scientific tests rather than skip them.
 
-GitHub Actions is configured with immutable action revisions and read-only
-repository permissions. CI execution itself requires publishing this branch.
+GitHub Actions uses immutable action revisions and read-only repository
+permissions. The hosted matrix exercises Python 3.10/3.12 on Linux/macOS, with
+a separate scientific-dependency job. Initial macOS execution exposed canonical
+temporary-directory aliases and an exiting-process-group probe race; canonical
+Git grants and bounded retry/reaping now cover both, with focused regressions.
 
 The first authenticated Codex CLI 0.153.4 check failed before commands with
 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`; the runner correctly

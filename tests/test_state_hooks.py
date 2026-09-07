@@ -348,6 +348,21 @@ class HookTests(RuntimeFixture):
         self.assertFalse(sentinel.exists())
         self.assertEqual(json.loads(self.hook("stop").stdout)["decision"], "block")
 
+    def test_inspection_finishing_while_paused_does_not_suppress_resumed_loop(self):
+        self.activate()
+        sentinel = self.directory / ".autoresearch-inspect"
+        sentinel.touch()
+        pause = self.directory / ".autoresearch-off"
+        pause.touch()
+        original = self.path.read_bytes()
+        completed = self.hook("stop")
+        self.assertEqual((completed.returncode, completed.stdout), (0, ""))
+        self.assertFalse(sentinel.exists())
+        self.assertTrue(pause.exists())
+        self.assertEqual(self.path.read_bytes(), original)
+        pause.unlink()  # Simulate a later explicit resume within the budget.
+        self.assertEqual(json.loads(self.hook("stop").stdout)["decision"], "block")
+
     def test_checkpoint_and_rehydrate_parse_json_with_spaces(self):
         self.activate(config(), result(description='contains "run": and "status":"keep"'), result(2, status="discard"))
         original = self.path.read_bytes()

@@ -61,7 +61,7 @@ class CodexLoopTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="ar loop test ")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.bin = self.root / "bin"
         self.bin.mkdir()
         fake = self.bin / "codex"
@@ -113,7 +113,7 @@ class CodexLoopTests(unittest.TestCase):
         original = self.root
         linked_temp = tempfile.TemporaryDirectory(prefix="ar linked worktree ")
         self.addCleanup(linked_temp.cleanup)
-        linked = Path(linked_temp.name) / "experiment"
+        linked = Path(linked_temp.name).resolve() / "experiment"
         self.git("worktree", "add", "-q", "-b", "linked-experiment", str(linked))
         for name in ("autoresearch.md", "autoresearch.sh", "autoresearch.jsonl"):
             (linked / name).write_bytes((original / name).read_bytes())
@@ -137,6 +137,17 @@ class CodexLoopTests(unittest.TestCase):
             with self.subTest(path=path), mock.patch.object(runner, "git", return_value=str(path)):
                 with self.assertRaises(runner.LoopError):
                     runner.git_metadata_roots(self.root)
+
+    def test_symlinked_workspace_uses_canonical_metadata_grants(self):
+        original = self.root
+        alias = self.bin / "workspace-alias"
+        alias.symlink_to(original, target_is_directory=True)
+        self.root = alias
+        result = self.run_loop("--max-turns", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = json.loads((original / "invocations").read_text())
+        grants = [call[i + 1] for i, arg in enumerate(call) if arg == "--add-dir"]
+        self.assertEqual(grants, [str(original / ".git")])
 
     def test_max_turns(self):
         result = self.run_loop("--max-turns", "1")
@@ -305,6 +316,71 @@ class CodexLoopTests(unittest.TestCase):
             runner.run_turn([sys.executable, "-c", "import time; time.sleep(30)"],
                             "large prompt " * 100000, self.root, log_dir, 0.2)
         self.assertLess(time.monotonic() - started, 6)
+
+    def test_timeout_reaps_child_after_transient_process_group_probe_denial(self):
+        spec = importlib.util.spec_from_file_location("codex_loop_probe_race_test", RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        log_dir = self.root / "experiments/probe-race"
+        log_dir.mkdir(parents=True)
+        real_killpg = os.killpg
+        real_popen = subprocess.Popen
+        processes = []
+        injected = False
+
+        def capture_process(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        def transient_denial(pgid, signum):
+            nonlocal injected
+            if signum == 0 and not injected:
+                injected = True
+                raise PermissionError("group contains only an exiting zombie")
+            return real_killpg(pgid, signum)
+
+        try:
+            with mock.patch.object(runner.subprocess, "Popen", side_effect=capture_process), \
+                    mock.patch.object(runner.os, "killpg", side_effect=transient_denial):
+                with self.assertRaisesRegex(runner.LoopError, "budget expired"):
+                    runner.run_turn([sys.executable, "-c", "import time; time.sleep(30)"],
+                                    "prompt", self.root, log_dir, 0.2)
+            self.assertTrue(injected)
+            self.assertEqual(len(processes), 1)
+            self.assertIsNotNone(processes[0].returncode, "direct child was not reaped")
+            self.assertFalse(self.process_running(processes[0].pid))
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
+
+    def test_persistent_process_group_permission_failure_is_not_silenced(self):
+        spec = importlib.util.spec_from_file_location("codex_loop_probe_denied_test", RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        process = mock.Mock(pid=123456, poll=mock.Mock(return_value=None))
+
+        def denied(pgid, signum):
+            if signum != signal.SIGTERM:
+                raise PermissionError("cannot signal live process group")
+
+        with mock.patch.object(runner.os, "killpg", side_effect=denied) as killpg, \
+                mock.patch.object(runner.time, "monotonic", side_effect=[0, 0, 4]), \
+                mock.patch.object(runner.time, "sleep"):
+            with self.assertRaisesRegex(PermissionError, "cannot signal live process group"):
+                runner.terminate(process)
+        self.assertIn(mock.call(process.pid, signal.SIGKILL), killpg.call_args_list)
+
+    def test_disappeared_process_group_still_reaps_direct_child(self):
+        spec = importlib.util.spec_from_file_location("codex_loop_group_gone_test", RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        process = mock.Mock(pid=123456)
+        with mock.patch.object(runner.os, "killpg", side_effect=ProcessLookupError):
+            runner.terminate(process)
+        process.wait.assert_called_once_with(timeout=3)
 
 
 if __name__ == "__main__":
